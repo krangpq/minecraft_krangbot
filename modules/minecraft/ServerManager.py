@@ -380,3 +380,92 @@ class ServerManager:
             await self.stop_server(server_id, force=False)
         
         print("✅ 서버 정리 완료")
+    async def get_server_performance(self, server_id: str) -> Optional[dict]:
+        """서버 성능 정보 조회 (CPU, 메모리, 가동시간)"""
+        try:
+            obj = self.running_servers.get(server_id)
+            if not obj:
+                return None
+            
+            # Screen 세션인 경우 PID 찾기
+            if isinstance(obj, str):
+                # screen 세션에서 실행 중인 java 프로세스 찾기
+                for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+                    try:
+                        cmdline = proc.info.get('cmdline', [])
+                        if cmdline and 'java' in proc.info['name'].lower():
+                            # 서버 경로가 포함되어 있는지 확인
+                            config = self.get_server_config(server_id)
+                            if config and config['path'] in ' '.join(cmdline):
+                                pid = proc.info['pid']
+                                process = psutil.Process(pid)
+                                break
+                    except:
+                        continue
+                else:
+                    return None
+            # Popen 프로세스인 경우
+            elif isinstance(obj, subprocess.Popen):
+                try:
+                    process = psutil.Process(obj.pid)
+                except:
+                    return None
+            else:
+                return None
+            
+            # 성능 정보 수집
+            cpu_percent = process.cpu_percent(interval=0.1)
+            memory_info = process.memory_info()
+            memory_mb = memory_info.rss / 1024 / 1024
+            
+            # 전체 시스템 메모리 대비 비율
+            memory_percent = process.memory_percent()
+            
+            # 스레드 수
+            threads = process.num_threads()
+            
+            # 가동 시간
+            create_time = process.create_time()
+            uptime_seconds = psutil.boot_time() - create_time
+            if uptime_seconds < 0:
+                uptime_seconds = 0
+            
+            return {
+                "cpu_percent": cpu_percent,
+                "memory_mb": memory_mb,
+                "memory_percent": memory_percent,
+                "threads": threads,
+                "uptime_seconds": uptime_seconds
+            }
+            
+        except Exception as e:
+            print(f"⚠️ 성능 정보 조회 실패: {e}")
+            return None
+    
+    def get_all_server_ids(self) -> list:
+        """모든 서버 ID 목록 반환"""
+        return list(self.servers_config.keys())
+    
+    async def restart_server(self, server_id: str) -> Tuple[bool, str]:
+        """서버 재시작"""
+        config = self.get_server_config(server_id)
+        if not config:
+            return False, f"서버를 찾을 수 없습니다: {server_id}"
+        
+        # 중지
+        print(f"🔄 서버 재시작 중: {config['name']}")
+        success, stop_msg = await self.stop_server(server_id, force=False)
+        
+        if not success:
+            return False, f"중지 실패: {stop_msg}"
+        
+        # 대기
+        await asyncio.sleep(3)
+        
+        # 시작
+        success, start_msg = await self.start_server(server_id)
+        
+        if success:
+            return True, f"{config['name']} 서버가 재시작되었습니다."
+        else:
+            return False, f"시작 실패: {start_msg}"

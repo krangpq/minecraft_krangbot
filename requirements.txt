@@ -1,0 +1,11 @@
+# Discord.py
+discord.py>=2.3.0
+
+# Minecraft 서버 상태 확인
+mcstatus>=11.0.0
+
+# RCON 클라이언트
+mcrcon>=0.7.0
+
+# 시스템 모니터링
+psutil>=5.9.0
