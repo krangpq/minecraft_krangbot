@@ -1,0 +1,315 @@
+"""
+마인크래프트 서버 자동 설정 및 초기화
+경로: modules/minecraft/ServerConfigurator.py
+"""
+
+import json
+import secrets
+import re
+from pathlib import Path
+from typing import Tuple, Optional
+
+
+class ServerConfigurator:
+    """서버 자동 설정 관리"""
+    
+    BOT_CONFIG_FILE = "bot_config.json"
+    
+    def __init__(self, default_min_memory: int, default_max_memory: int):
+        """
+        Args:
+            default_min_memory: 기본 최소 메모리 (MB)
+            default_max_memory: 기본 최대 메모리 (MB)
+        """
+        self.default_min_memory = default_min_memory
+        self.default_max_memory = default_max_memory
+    
+    def scan_server_folder(self, server_path: Path) -> Tuple[bool, str, Optional[dict]]:
+        """
+        서버 폴더를 스캔하여 정보 수집
+        
+        Returns:
+            (유효한 폴더인지, 메시지, 서버 정보)
+        """
+        if not server_path.exists():
+            return False, "폴더가 존재하지 않습니다.", None
+        
+        if not server_path.is_dir():
+            return False, "폴더가 아닙니다.", None
+        
+        # server.jar 찾기
+        jar_files = list(server_path.glob("*.jar"))
+        
+        if not jar_files:
+            return False, "서버 jar 파일을 찾을 수 없습니다.", None
+        
+        # 서버 jar 파일 선택 (server.jar 우선, 없으면 첫 번째)
+        server_jar = None
+        for jar in jar_files:
+            if jar.name.lower() == "server.jar":
+                server_jar = jar
+                break
+        
+        if not server_jar:
+            server_jar = jar_files[0]
+        
+        info = {
+            "jar_file": server_jar.name,
+            "has_world": (server_path / "world").exists(),
+            "has_eula": (server_path / "eula.txt").exists(),
+            "has_properties": (server_path / "server.properties").exists(),
+            "has_bot_config": (server_path / self.BOT_CONFIG_FILE).exists()
+        }
+        
+        return True, "서버 폴더가 유효합니다.", info
+    
+    def load_bot_config(self, server_path: Path) -> dict:
+        """
+        bot_config.json 로드 (없으면 기본값 생성)
+        
+        Returns:
+            서버 설정 딕셔너리
+        """
+        config_file = server_path / self.BOT_CONFIG_FILE
+        
+        if config_file.exists():
+            try:
+                with open(config_file, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+                print(f"✅ 봇 설정 로드: {server_path.name}")
+                return config
+            except Exception as e:
+                print(f"⚠️ 봇 설정 로드 실패, 기본값 사용: {e}")
+        
+        # 기본 설정 생성
+        config = {
+            "memory": {
+                "min": self.default_min_memory,
+                "max": self.default_max_memory
+            },
+            "rcon": {
+                "port": 25575,
+                "auto_password": True  # 자동으로 비밀번호 생성
+            },
+            "description": ""
+        }
+        
+        # 저장
+        self.save_bot_config(server_path, config)
+        print(f"✅ 봇 설정 생성: {server_path.name}")
+        
+        return config
+    
+    def save_bot_config(self, server_path: Path, config: dict):
+        """bot_config.json 저장"""
+        config_file = server_path / self.BOT_CONFIG_FILE
+        
+        try:
+            with open(config_file, 'w', encoding='utf-8') as f:
+                json.dump(config, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            print(f"❌ 봇 설정 저장 실패: {e}")
+    
+    def generate_rcon_password(self, length: int = 16) -> str:
+        """안전한 RCON 비밀번호 생성"""
+        # 영문, 숫자, 특수문자 조합
+        alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*"
+        password = ''.join(secrets.choice(alphabet) for _ in range(length))
+        return password
+    
+    def setup_eula(self, server_path: Path) -> Tuple[bool, str]:
+        """
+        eula.txt 자동 설정
+        
+        Returns:
+            (성공 여부, 메시지)
+        """
+        eula_file = server_path / "eula.txt"
+        
+        try:
+            # 파일이 있으면 읽기
+            if eula_file.exists():
+                with open(eula_file, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                
+                # 이미 true면 스킵
+                if 'eula=true' in content:
+                    return True, "EULA가 이미 동의되어 있습니다."
+                
+                # false를 true로 변경
+                content = re.sub(r'eula=false', 'eula=true', content)
+            else:
+                # 파일이 없으면 새로 생성
+                content = (
+                    "# By changing the setting below to TRUE you are indicating your agreement to our EULA (https://aka.ms/MinecraftEULA).\n"
+                    "# Generated by Discord Bot\n"
+                    "eula=true\n"
+                )
+            
+            # 저장
+            with open(eula_file, 'w', encoding='utf-8') as f:
+                f.write(content)
+            
+            print(f"✅ EULA 동의 완료: {server_path.name}")
+            return True, "EULA가 자동으로 동의되었습니다."
+            
+        except Exception as e:
+            print(f"❌ EULA 설정 실패: {e}")
+            return False, f"EULA 설정 오류: {e}"
+    
+    def setup_rcon(self, server_path: Path, rcon_port: int, rcon_password: str) -> Tuple[bool, str]:
+        """
+        server.properties에 RCON 설정 추가/수정
+        
+        Returns:
+            (성공 여부, 메시지)
+        """
+        properties_file = server_path / "server.properties"
+        
+        try:
+            # 파일 읽기 (없으면 빈 문자열)
+            if properties_file.exists():
+                with open(properties_file, 'r', encoding='utf-8') as f:
+                    lines = f.readlines()
+            else:
+                lines = []
+            
+            # RCON 설정 업데이트
+            rcon_settings = {
+                'enable-rcon': 'true',
+                'rcon.port': str(rcon_port),
+                'rcon.password': rcon_password
+            }
+            
+            # 기존 라인 수정 또는 추가
+            updated_lines = []
+            found_keys = set()
+            
+            for line in lines:
+                line = line.strip()
+                
+                # 주석이나 빈 줄은 그대로 유지
+                if not line or line.startswith('#'):
+                    updated_lines.append(line)
+                    continue
+                
+                # key=value 파싱
+                if '=' in line:
+                    key = line.split('=')[0].strip()
+                    
+                    # RCON 관련 설정이면 업데이트
+                    if key in rcon_settings:
+                        updated_lines.append(f"{key}={rcon_settings[key]}")
+                        found_keys.add(key)
+                    else:
+                        updated_lines.append(line)
+                else:
+                    updated_lines.append(line)
+            
+            # 없었던 설정 추가
+            if not found_keys:
+                updated_lines.append("")
+                updated_lines.append("# RCON Settings (Auto-generated by Bot)")
+            
+            for key, value in rcon_settings.items():
+                if key not in found_keys:
+                    updated_lines.append(f"{key}={value}")
+            
+            # 저장
+            with open(properties_file, 'w', encoding='utf-8') as f:
+                f.write('\n'.join(updated_lines))
+            
+            print(f"✅ RCON 설정 완료: {server_path.name}")
+            return True, f"RCON이 포트 {rcon_port}에 설정되었습니다."
+            
+        except Exception as e:
+            print(f"❌ RCON 설정 실패: {e}")
+            return False, f"RCON 설정 오류: {e}"
+    
+    def get_server_port(self, server_path: Path) -> int:
+        """server.properties에서 포트 읽기"""
+        properties_file = server_path / "server.properties"
+        
+        if not properties_file.exists():
+            return 25565  # 기본 포트
+        
+        try:
+            with open(properties_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith('server-port='):
+                        port = line.split('=')[1].strip()
+                        return int(port)
+        except:
+            pass
+        
+        return 25565  # 기본 포트
+    
+    def prepare_server(self, server_path: Path) -> Tuple[bool, str, dict]:
+        """
+        서버 최초 실행 전 모든 설정 자동화
+        
+        1. bot_config.json 로드/생성
+        2. EULA 동의
+        3. RCON 비밀번호 생성 및 설정
+        
+        Returns:
+            (성공 여부, 메시지, 서버 설정)
+        """
+        print(f"\n🔧 서버 설정 중: {server_path.name}")
+        
+        # 1. 서버 폴더 검증
+        valid, message, info = self.scan_server_folder(server_path)
+        if not valid:
+            return False, message, {}
+        
+        # 2. 봇 설정 로드
+        bot_config = self.load_bot_config(server_path)
+        
+        # 3. EULA 동의
+        success, eula_msg = self.setup_eula(server_path)
+        if not success:
+            return False, eula_msg, {}
+        
+        # 4. RCON 비밀번호 생성
+        if bot_config['rcon'].get('auto_password', True):
+            rcon_password = self.generate_rcon_password()
+        else:
+            rcon_password = bot_config['rcon'].get('password', self.generate_rcon_password())
+        
+        rcon_port = bot_config['rcon'].get('port', 25575)
+        
+        # 5. RCON 설정
+        success, rcon_msg = self.setup_rcon(server_path, rcon_port, rcon_password)
+        if not success:
+            return False, rcon_msg, {}
+        
+        # 6. 서버 포트 읽기
+        server_port = self.get_server_port(server_path)
+        
+        # 7. 서버 설정 반환
+        server_config = {
+            "name": server_path.name.replace('_', ' ').title(),
+            "path": str(server_path),
+            "jar_file": info['jar_file'],
+            "memory": {
+                "min": bot_config['memory']['min'],
+                "max": bot_config['memory']['max']
+            },
+            "port": server_port,
+            "rcon": {
+                "enabled": True,
+                "host": "localhost",
+                "port": rcon_port,
+                "password": rcon_password
+            },
+            "description": bot_config.get('description', ''),
+            "is_new": not info['has_world']  # world 폴더가 없으면 신규
+        }
+        
+        print(f"✅ 서버 설정 완료: {server_path.name}")
+        print(f"   - 메모리: {server_config['memory']['min']}MB ~ {server_config['memory']['max']}MB")
+        print(f"   - 포트: {server_config['port']}")
+        print(f"   - RCON: {server_config['rcon']['port']} (비밀번호 자동 생성)")
+        
+        return True, "서버 설정이 완료되었습니다.", server_config
