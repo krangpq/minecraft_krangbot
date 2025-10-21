@@ -11,6 +11,33 @@ from typing import Optional
 def setup_commands(bot):
     """마인크래프트 서버 관련 슬래시 명령어 등록"""
     
+    # 서버 ID 자동완성 - 데코레이터에서 참조되므로 먼저 정의해야 함
+    async def server_autocomplete(
+        interaction: discord.Interaction,
+        current: str,
+    ) -> list[app_commands.Choice[str]]:
+        """서버 ID 자동완성"""
+        try:
+            servers = bot.mc.get_all_server_ids()
+            choices = []
+            
+            for sid in servers:
+                config = bot.mc.get_server_config(sid)
+                if config is None:  # 설정이 없으면 건너뛰기
+                    continue
+                
+                server_name = config.get('name', sid)
+                
+                # 검색어 필터링
+                if current.lower() in sid.lower() or current.lower() in server_name.lower():
+                    choices.append(
+                        app_commands.Choice(name=f"{sid} - {server_name}", value=sid)
+                    )
+            
+            return choices[:25]  # Discord 제한: 최대 25개
+        except Exception as e:
+            print(f"⚠️ 자동완성 오류: {e}")
+            return []
     
     @bot.tree.command(name="서버시작", description="마인크래프트 서버를 시작합니다")
     @app_commands.describe(서버="시작할 서버 (기본: 메인 서버)")
@@ -385,30 +412,3 @@ def setup_commands(bot):
         embed.set_footer(text="💡 Discord에서는 /명령어실행 또는 RCON 사용을 권장합니다")
         
         await interaction.response.send_message(embed=embed)
-    # 서버 ID 자동완성
-    async def server_autocomplete(
-        interaction: discord.Interaction,
-        current: str,
-    ) -> list[app_commands.Choice[str]]:
-        """서버 ID 자동완성"""
-        try:
-            servers = bot.mc.get_all_server_ids()
-            choices = []
-            
-            for sid in servers:
-                config = bot.mc.get_server_config(sid)
-                if config is None:  # 설정이 없으면 건너뛰기
-                    continue
-                
-                server_name = config.get('name', sid)
-                
-                # 검색어 필터링
-                if current.lower() in sid.lower() or current.lower() in server_name.lower():
-                    choices.append(
-                        app_commands.Choice(name=f"{sid} - {server_name}", value=sid)
-                    )
-            
-            return choices[:25]  # Discord 제한: 최대 25개
-        except Exception as e:
-            print(f"⚠️ 자동완성 오류: {e}")
-            return []
