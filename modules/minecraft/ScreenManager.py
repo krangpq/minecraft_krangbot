@@ -45,30 +45,6 @@ class ScreenManager:
             return []
     
     @staticmethod
-    def find_screen_by_name(session_name: str) -> Optional[str]:
-        """
-        Screen 세션을 이름으로 찾기 (PID.name 형식 처리)
-        
-        Args:
-            session_name: 찾을 세션 이름
-        
-        Returns:
-            전체 세션 ID (예: "12345.minecraft_main") 또는 None
-        """
-        screens = ScreenManager.list_screens()
-        
-        for screen in screens:
-            # "12345.minecraft_main" 형식에서 이름 부분만 추출
-            if '.' in screen:
-                parts = screen.split('.', 1)
-                if len(parts) == 2 and parts[1] == session_name:
-                    return screen
-            elif screen == session_name:
-                return screen
-        
-        return None
-    
-    @staticmethod
     def screen_exists(session_name: str) -> bool:
         """특정 screen 세션이 존재하는지 확인 (PID 무시)"""
         return ScreenManager.find_screen_by_name(session_name) is not None
@@ -203,24 +179,6 @@ class ScreenManager:
                 return False, "Screen 세션 종료 실패"
             
         except Exception as e:
-            return False, f"Screen 종료 오류: {e}" 'quit']
-            
-            process = await asyncio.create_subprocess_exec(
-                *screen_command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            
-            await process.wait()
-            
-            # 종료 확인
-            await asyncio.sleep(1)
-            if not ScreenManager.screen_exists(session_name):
-                return True, f"Screen 세션 종료 완료: {session_name}"
-            else:
-                return False, "Screen 세션 종료 실패"
-            
-        except Exception as e:
             return False, f"Screen 종료 오류: {e}"
     
     @staticmethod
@@ -232,7 +190,38 @@ class ScreenManager:
             "screen -r session_name" 명령어 문자열
         """
         return f"screen -r {session_name}"
-
+    @staticmethod
+    def find_screen_by_name(session_name: str) -> Optional[str]:
+        """
+        Screen 세션을 이름으로 찾기 (PID.name 형식 처리)
+        
+        Args:
+            session_name: 찾을 세션 이름
+        
+        Returns:
+            전체 세션 ID (예: "12345.minecraft_main") 또는 None
+        """
+        screens = ScreenManager.list_screens()
+        
+        for screen in screens:
+            # "12345.minecraft_main" 형식에서 이름 부분만 추출
+            if '.' in screen:
+                # 점을 기준으로 나누되, 첫 번째만 PID로 간주 (나머지는 세션명)
+                parts = screen.split('.', 1)
+                if len(parts) == 2:
+                    # PID는 숫자여야 함
+                    pid_part = parts[0]
+                    name_part = parts[1]
+                    
+                    # PID가 숫자인지 확인
+                    if pid_part.isdigit() and name_part == session_name:
+                        return screen
+            
+            # 점이 없는 경우 (드물지만 가능)
+            if screen == session_name:
+                return screen
+        
+        return None
 
 class TerminalLauncher:
     """OS별 터미널 실행기 (Screen 통합)"""

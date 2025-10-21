@@ -383,6 +383,8 @@ class ServerManager:
     async def get_server_performance(self, server_id: str) -> Optional[dict]:
         """서버 성능 정보 조회 (CPU, 메모리, 가동시간)"""
         try:
+            import time  # 추가
+            
             obj = self.running_servers.get(server_id)
             if not obj:
                 return None
@@ -424,11 +426,9 @@ class ServerManager:
             # 스레드 수
             threads = process.num_threads()
             
-            # 가동 시간
+            # 가동 시간 (수정됨)
             create_time = process.create_time()
-            uptime_seconds = psutil.boot_time() - create_time
-            if uptime_seconds < 0:
-                uptime_seconds = 0
+            uptime_seconds = time.time() - create_time
             
             return {
                 "cpu_percent": cpu_percent,
@@ -441,7 +441,7 @@ class ServerManager:
         except Exception as e:
             print(f"⚠️ 성능 정보 조회 실패: {e}")
             return None
-    
+        
     def get_all_server_ids(self) -> list:
         """모든 서버 ID 목록 반환"""
         return list(self.servers_config.keys())
@@ -469,3 +469,4 @@ class ServerManager:
             return True, f"{config['name']} 서버가 재시작되었습니다."
         else:
             return False, f"시작 실패: {start_msg}"
+    
