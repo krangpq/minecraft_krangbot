@@ -148,7 +148,8 @@ class MinecraftBot(commands.Bot):
         # 서버 목록 (main.py의 on_ready 메서드 내부)
         print(f"\n📋 관리 중인 서버: {len(self.mc.servers_config)}개")
         for server_id, config in self.mc.servers_config.items():
-            status = "🟢" if self.mc.is_server_running(server_id) else "🔴"
+            # ✅ 프로세스만 체크
+            status = "🟢" if self.mc.is_process_running(server_id) else "🔴"
             
             # 메모리 정보 안전하게 가져오기
             memory_config = config.get('memory', {})

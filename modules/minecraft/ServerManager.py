@@ -426,3 +426,20 @@ class ServerManager:
             await self.stop_server(server_id, force=False)
         
         print("✅ 서버 정리 완료")
+
+    def is_process_running(self, server_id: str) -> bool:
+        """프로세스 실행 여부만 확인 (포트 체크 안 함)"""
+        if server_id not in self.running_servers:
+            return False
+        
+        obj = self.running_servers[server_id]
+        
+        # Screen 세션인 경우
+        if isinstance(obj, str) and SCREEN_AVAILABLE:
+            return ScreenManager.screen_exists(obj)
+        
+        # Popen 프로세스인 경우
+        if isinstance(obj, subprocess.Popen):
+            return obj.poll() is None
+        
+        return False
