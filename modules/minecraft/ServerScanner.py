@@ -119,23 +119,4 @@ class ServerScanner:
         
         print(f"\n📊 총 {len(servers)}개 서버 발견\n")
         
-        return servers
-    
-    def scan_all_servers(self) -> Dict[str, dict]:
-        # ... 기존 코드 ...
-        
-        # GCP 환경이면 방화벽 경고
-        if "GOOGLE" in platform.platform().upper():
-            print("\n" + "="*60)
-            print("⚠️ GCP 방화벽 설정 필요!")
-            print("="*60)
-            print("다음 포트를 GCP 방화벽에서 열어주세요:")
-            for server_id, config in servers.items():
-                print(f"  - {config['port']} (TCP) - {config['name']}")
-            print("\n방화벽 규칙 추가:")
-            print("  gcloud compute firewall-rules create minecraft \\")
-            print("    --allow tcp:25565-25600 \\")
-            print("    --source-ranges 0.0.0.0/0")
-            print("="*60 + "\n")
-        
-        return servers
+        return servers  # ✅ 이 줄의 들여쓰기가 함수 레벨이어야 함!
