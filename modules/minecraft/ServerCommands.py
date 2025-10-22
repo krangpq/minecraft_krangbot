@@ -261,10 +261,24 @@ def setup_commands(bot):
         
         for server_id in server_ids:
             config = bot.mc.get_server_config(server_id)
-            is_running = bot.mc.is_server_running(server_id)
+            # ✅ 프로세스 체크만 수행 (포트 대기 시간 무시)
+            is_process_running = bot.mc.is_process_running(server_id)
+            # 추가: 실제 온라인 상태도 표시
+            is_online = bot.mc.is_server_running(server_id)
             
-            status_emoji = "🟢" if is_running else "🔴"
-            value = f"{status_emoji} {config.get('description', '설명 없음')}\n"
+            # 상태 이모지 결정
+            if is_online:
+                status_emoji = "🟢"  # 완전 온라인
+                status_text = "온라인"
+            elif is_process_running:
+                status_emoji = "🟡"  # 시작 중
+                status_text = "시작 중"
+            else:
+                status_emoji = "🔴"  # 오프라인
+                status_text = "오프라인"
+            
+            value = f"{status_emoji} **{status_text}**\n"
+            value += f"{config.get('description', '설명 없음')}\n"
             value += f"포트: `{config['port']}`"
             
             embed.add_field(

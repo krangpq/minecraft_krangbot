@@ -155,7 +155,7 @@ class ServerManager:
             if config:
                 import socket
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.settimeout(1)
+                sock.settimeout(0.5)  # ✅ 타임아웃 0.5초로 단축
                 try:
                     result = sock.connect_ex(('localhost', config['port']))
                     sock.close()
@@ -480,3 +480,53 @@ class ServerManager:
             await self.stop_server(server_id, force=False)
         
         print("✅ 서버 정리 완료")
+    
+    async def backup_world(self, server_id: str) -> Tuple[bool, str]:
+        """월드 백업"""
+        try:
+            config = self.get_server_config(server_id)
+            if not config:
+                return False, f"서버 설정을 찾을 수 없습니다: {server_id}"
+            
+            server_path = Path(config['path'])
+            world_path = server_path / "world"
+            
+            if not world_path.exists():
+                return False, "월드 폴더가 존재하지 않습니다."
+            
+            # 백업 폴더 생성
+            backup_dir = server_path / "backups"
+            backup_dir.mkdir(exist_ok=True)
+            
+            # 백업 파일명 (타임스탬프)
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            backup_name = f"world_backup_{timestamp}"
+            backup_path = backup_dir / backup_name
+            
+            # RCON으로 저장 명령 (서버 실행 중이면)
+            if self.is_server_running(server_id) and self.has_rcon(server_id):
+                rcon = self.rcon_clients[server_id]
+                await rcon.save_all()
+                await asyncio.sleep(2)  # 저장 완료 대기
+            
+            # 월드 폴더 압축
+            import shutil
+            await asyncio.to_thread(
+                shutil.make_archive,
+                str(backup_path),
+                'zip',
+                str(world_path)
+            )
+            
+            backup_file = f"{backup_path}.zip"
+            backup_size = Path(backup_file).stat().st_size / (1024 * 1024)  # MB
+            
+            return True, (
+                f"{config['name']} 월드 백업 완료!\n"
+                f"파일: `{backup_name}.zip` ({backup_size:.1f}MB)\n"
+                f"위치: `{backup_dir}`"
+            )
+            
+        except Exception as e:
+            print(f"❌ 백업 오류: {e}")
+            return False, f"백업 실패: {e}"
