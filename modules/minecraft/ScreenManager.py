@@ -23,25 +23,76 @@ class ScreenManager:
             return False
     
     @staticmethod
-    def list_screens() -> List[str]:
-        """실행 중인 모든 screen 세션 목록"""
+    def list_screens(filter_prefix: str = None) -> List[str]:
+        """
+        실행 중인 모든 screen 세션 목록 (개선된 파싱)
+        
+        Args:
+            filter_prefix: 세션 이름 필터 (예: "minecraft_")
+        """
         try:
             result = subprocess.run(
                 ['screen', '-ls'],
                 capture_output=True,
                 text=True
             )
-            # 출력 파싱
+            
+            # 디버깅: 원본 출력 확인
+            print(f"      [DEBUG] screen -ls 원본 출력:")
+            for line in result.stdout.split('\n'):
+                if line.strip():
+                    print(f"      [DEBUG]   '{line}'")
+            
+            # 출력 파싱 (개선된 버전)
             lines = result.stdout.split('\n')
             screens = []
+            
             for line in lines:
-                if '\t' in line and '(' in line:
-                    # "12345.session_name	(Detached)" 형식
-                    screen_name = line.split('\t')[0].strip()
-                    screens.append(screen_name)
+                # 공백/탭 정리
+                line = line.strip()
+                
+                # 빈 줄이나 헤더 라인 건너뛰기
+                if not line:
+                    continue
+                if line.startswith('There'):
+                    continue
+                if line.startswith('No Sockets'):
+                    continue
+                if 'Socket' in line and 'in' in line:
+                    continue
+                
+                # 세션 라인 감지: "PID.name (상태)" 형식
+                if '.' in line and '(' in line:
+                    # 공백이나 탭으로 시작하는 세션 라인
+                    # 예: "    12345.minecraft_testserver   (Detached)"
+                    parts = line.split()
+                    if parts:
+                        # 첫 번째 단어가 PID.name 형식
+                        session_id = parts[0]
+                        # PID가 숫자로 시작하는지 확인
+                        if '.' in session_id:
+                            pid_part = session_id.split('.')[0]
+                            name_part = session_id.split('.', 1)[1]
+                            
+                            if pid_part.isdigit():
+                                # ✅ 필터링: minecraft_로 시작하는 세션만
+                                if filter_prefix:
+                                    if name_part.startswith(filter_prefix):
+                                        screens.append(session_id)
+                                        print(f"      [DEBUG] 파싱된 세션 (필터 통과): {session_id}")
+                                    else:
+                                        print(f"      [DEBUG] 세션 제외 (필터 불일치): {session_id} (이름: {name_part})")
+                                else:
+                                    screens.append(session_id)
+                                    print(f"      [DEBUG] 파싱된 세션: {session_id}")
+            
+            print(f"      [DEBUG] 최종 세션 목록: {screens}")
             return screens
+            
         except Exception as e:
             print(f"⚠️ screen 목록 조회 실패: {e}")
+            import traceback
+            traceback.print_exc()
             return []
     
     @staticmethod
@@ -66,6 +117,7 @@ class ScreenManager:
         try:
             print(f"   🔍 Screen 세션 생성 시작")
             print(f"      요청 세션명: {session_name}")
+            print(f"      작업 디렉토리: {cwd}")
             
             # 기존 세션 확인
             existing_session = ScreenManager.find_screen_by_name(session_name)
@@ -97,10 +149,19 @@ class ScreenManager:
                 stderr=asyncio.subprocess.PIPE
             )
             
-            stdout, stderr = await process.wait(), None
+            stdout, stderr = await process.communicate()
             
+            # ✅ screen 명령어 실행 결과 확인
+            if process.returncode != 0:
+                error_msg = stderr.decode() if stderr else "알 수 없는 오류"
+                print(f"      ❌ screen 명령어 실행 실패 (코드 {process.returncode})")
+                print(f"      stderr: {error_msg}")
+                return False, f"Screen 명령어 실행 실패: {error_msg}", None
+            
+            if stdout:
+                print(f"      stdout: {stdout.decode()}")
             if stderr:
-                print(f"      stderr: {stderr}")
+                print(f"      stderr: {stderr.decode()}")
             
             # ✅ 세션 생성 확인 (최대 5초 대기, 0.5초 간격으로 10번 확인)
             print(f"      ⏳ Screen 세션 등록 확인 중...")
@@ -114,7 +175,8 @@ class ScreenManager:
                     print(f"      ✅ 세션 확인됨: {actual_session} (시도 {i+1}/10)")
                     return True, f"Screen 세션 생성 완료: {actual_session}", actual_session
                 else:
-                    print(f"      ⏳ 대기 중... (시도 {i+1}/10)")
+                    if i == 0 or i == 4 or i == 9:  # 처음, 중간, 마지막만 출력
+                        print(f"      ⏳ 대기 중... (시도 {i+1}/10)")
             
             # 최종 확인
             all_screens = ScreenManager.list_screens()
@@ -224,12 +286,13 @@ class ScreenManager:
         Screen 세션을 이름으로 찾기 (PID.name 형식 처리) - 디버깅 강화
         
         Args:
-            session_name: 찾을 세션 이름
+            session_name: 찾을 세션 이름 (예: "minecraft_testserver")
         
         Returns:
             전체 세션 ID (예: "12345.minecraft_main") 또는 None
         """
-        screens = ScreenManager.list_screens()
+        # ✅ minecraft_로 시작하는 세션만 검색
+        screens = ScreenManager.list_screens(filter_prefix="minecraft_")
         
         # 디버깅: 검색 과정 출력
         # print(f"      [find_screen_by_name] 찾는 이름: '{session_name}'")

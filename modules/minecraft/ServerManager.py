@@ -84,13 +84,13 @@ class ServerManager:
         
         print("\n🔄 기존 실행 중인 서버 확인 중...")
         
-        # 모든 Screen 세션 목록
-        all_screens = ScreenManager.list_screens()
+        # ✅ minecraft_로 시작하는 Screen 세션만 가져오기
+        all_screens = ScreenManager.list_screens(filter_prefix="minecraft_")
         
-        print(f"   📋 감지된 모든 Screen 세션: {all_screens}")  # ✅ 디버깅 로그
+        print(f"   📋 감지된 마인크래프트 Screen 세션: {all_screens}")  # ✅ 디버깅 로그
         
         if not all_screens:
-            print("   💤 실행 중인 Screen 세션 없음")
+            print("   💤 실행 중인 마인크래프트 Screen 세션 없음")
             return
         
         reconnected_count = 0
