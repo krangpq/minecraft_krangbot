@@ -69,8 +69,13 @@ class ScreenManager:
             
             if existing_session:
                 if reuse_existing:
-                    print(f"♻️ 기존 Screen 재사용: {existing_session}")
-                    return True, f"기존 Screen 세션 재사용: {existing_session}", existing_session
+                     # Screen은 있지만 내부 프로세스 확인 필요
+                    print(f"⚠️ 기존 Screen 세션 발견: {existing_session}")
+                    print(f"   새 명령어로 재시작합니다...")
+                    # 기존 세션 종료
+                    await ScreenManager.kill_screen(existing_session)
+                    await asyncio.sleep(1)
+                    # 아래 세션 생성 로직으로 계속 진행  
                 else:
                     return False, f"Screen 세션이 이미 존재합니다: {existing_session}", None
             

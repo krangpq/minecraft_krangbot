@@ -412,3 +412,23 @@ def setup_commands(bot):
         embed.set_footer(text="💡 Discord에서는 /명령어실행 또는 RCON 사용을 권장합니다")
         
         await interaction.response.send_message(embed=embed)
+    @bot.tree.command(name="백업", description="서버 월드 백업")
+    @app_commands.describe(서버="백업할 서버")
+    @app_commands.autocomplete(서버=server_autocomplete)
+    async def backup_world(interaction: discord.Interaction, 서버: Optional[str] = None):
+        """월드 백업"""
+        if not bot.is_authorized(interaction.user, "manage_guild"):
+            await interaction.response.send_message(
+                "❌ 권한이 없습니다.", ephemeral=True
+            )
+            return
+        
+        server_id = 서버 or bot.mc.default_server
+        await interaction.response.defer()
+        
+        success, message = await bot.mc.backup_world(server_id)
+        
+        if success:
+            await interaction.followup.send(f"✅ {message}")
+        else:
+            await interaction.followup.send(f"❌ {message}")

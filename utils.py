@@ -39,3 +39,34 @@ def is_authorized(user: discord.User, required_permission: str = "manage_guild")
     
     # 알 수 없는 권한은 거부
     return False
+
+# utils.py에 추가
+import logging
+from pathlib import Path
+
+def setup_logger(name: str, log_dir: Path):
+    """로거 설정"""
+    log_dir.mkdir(parents=True, exist_ok=True)
+    
+    logger = logging.getLogger(name)
+    logger.setLevel(logging.INFO)
+    
+    # 파일 핸들러
+    file_handler = logging.FileHandler(
+        log_dir / f"{name}.log",
+        encoding='utf-8'
+    )
+    file_handler.setFormatter(
+        logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
+    )
+    
+    # 콘솔 핸들러
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(
+        logging.Formatter('%(message)s')
+    )
+    
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+    
+    return logger

@@ -101,22 +101,40 @@ class ServerManager:
         """모든 서버 ID 목록"""
         return list(self.servers_config.keys())
     
-    def is_server_running(self, server_id: str) -> bool:
-        """서버 실행 여부 확인"""
-        if server_id not in self.running_servers:
+    # 개선된 코드
+def is_server_running(self, server_id: str) -> bool:
+    """서버 실행 여부 확인 (프로세스 + 네트워크 포트 체크)"""
+    if server_id not in self.running_servers:
+        return False
+    
+    obj = self.running_servers[server_id]
+    
+    # Screen 세션인 경우
+    if isinstance(obj, str) and SCREEN_AVAILABLE:
+        if not ScreenManager.screen_exists(obj):
             return False
         
-        obj = self.running_servers[server_id]
+        # 추가: 실제 서버 포트가 열려있는지 확인
+        config = self.get_server_config(server_id)
+        if config:
+            import socket
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(1)
+            try:
+                result = sock.connect_ex(('localhost', config['port']))
+                sock.close()
+                return result == 0
+            except:
+                return False
+        return True
+    
+    # ... 기존 Popen 로직
         
-        # Screen 세션인 경우
-        if isinstance(obj, str) and SCREEN_AVAILABLE:
-            return ScreenManager.screen_exists(obj)
+    # Popen 프로세스인 경우
+    if isinstance(obj, subprocess.Popen):
+        return obj.poll() is None
         
-        # Popen 프로세스인 경우
-        if isinstance(obj, subprocess.Popen):
-            return obj.poll() is None
-        
-        return False
+    return False
     
     def has_rcon(self, server_id: str) -> bool:
         """서버가 RCON을 지원하는지 확인"""
