@@ -245,6 +245,31 @@ class ServerConfigurator:
         
         return 25565  # 기본 포트
     
+    def _read_rcon_password(self, server_path: Path) -> Optional[str]:
+        """
+        server.properties에서 기존 RCON 비밀번호 읽기
+        
+        Returns:
+            기존 비밀번호 또는 None
+        """
+        properties_file = server_path / "server.properties"
+        
+        if not properties_file.exists():
+            return None
+        
+        try:
+            with open(properties_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith('rcon.password='):
+                        password = line.split('=', 1)[1].strip()
+                        if password:  # 비어있지 않은 비밀번호만
+                            return password
+        except Exception as e:
+            print(f"⚠️ RCON 비밀번호 읽기 실패: {e}")
+        
+        return None
+    
     def prepare_server(self, server_path: Path) -> Tuple[bool, str, dict]:
         """
         서버 최초 실행 전 모든 설정 자동화
@@ -271,13 +296,24 @@ class ServerConfigurator:
         if not success:
             return False, eula_msg, {}
         
-        # 4. RCON 비밀번호 생성
-        if bot_config['rcon'].get('auto_password', True):
-            rcon_password = self.generate_rcon_password()
-        else:
-            rcon_password = bot_config['rcon'].get('password', self.generate_rcon_password())
-        
+        # 4. RCON 비밀번호 처리 (✅ 수정된 부분)
         rcon_port = bot_config['rcon'].get('port', 25575)
+        
+        # ✅ server.properties에서 기존 비밀번호 읽기 시도
+        existing_password = self._read_rcon_password(server_path)
+        
+        if existing_password:
+            # 기존 비밀번호 사용 (서버가 이미 설정됨)
+            rcon_password = existing_password
+            print(f"   🔑 기존 RCON 비밀번호 사용")
+        elif bot_config['rcon'].get('auto_password', True):
+            # 새 비밀번호 생성
+            rcon_password = self.generate_rcon_password()
+            print(f"   🔑 새 RCON 비밀번호 생성")
+        else:
+            # 설정 파일에서 지정된 비밀번호 사용
+            rcon_password = bot_config['rcon'].get('password', self.generate_rcon_password())
+            print(f"   🔑 설정된 RCON 비밀번호 사용")
         
         # 5. RCON 설정
         success, rcon_msg = self.setup_rcon(server_path, rcon_port, rcon_password)
@@ -310,6 +346,6 @@ class ServerConfigurator:
         print(f"✅ 서버 설정 완료: {server_path.name}")
         print(f"   - 메모리: {server_config['memory']['min']}MB ~ {server_config['memory']['max']}MB")
         print(f"   - 포트: {server_config['port']}")
-        print(f"   - RCON: {server_config['rcon']['port']} (비밀번호 자동 생성)")
+        print(f"   - RCON: {server_config['rcon']['port']} (비밀번호: {'기존' if existing_password else '신규'})")
         
         return True, "서버 설정이 완료되었습니다.", server_config

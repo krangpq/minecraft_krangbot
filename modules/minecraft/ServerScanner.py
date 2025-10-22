@@ -65,8 +65,9 @@ class ServerScanner:
                 print(f"⚠️ 스킵: {message}")
                 continue
             
-            # 서버 설정 준비
-            success, prep_message, server_config = self.configurator.prepare_server(folder)
+            # 서버 설정 준비 (is_running 전달)
+            success, prep_message, server_config = self.configurator.prepare_server(
+                folder)
             
             if not success:
                 print(f"❌ 설정 실패: {prep_message}")
