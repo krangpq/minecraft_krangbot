@@ -1,5 +1,5 @@
 """
-마인크래프트 서버 관리 매니저 (Screen 통합)
+마인크래프트 서버 관리 매니저 (완전 버전)
 경로: modules/minecraft/ServerManager.py
 """
 
@@ -18,14 +18,15 @@ try:
     RCON_AVAILABLE = True
 except ImportError:
     RCON_AVAILABLE = False
+    print("⚠️ RCON 라이브러리가 설치되지 않았습니다. pip install mcrcon")
 
-# Screen 관리자
+# Screen/Terminal 관리자
 try:
     from .ScreenManager import TerminalLauncher, ScreenManager
     SCREEN_AVAILABLE = True
 except ImportError:
-    # 파일이 없으면 위의 코드를 ScreenManager.py로 저장
     SCREEN_AVAILABLE = False
+    print("⚠️ ScreenManager를 불러올 수 없습니다.")
 
 
 class ServerManager:
@@ -96,6 +97,10 @@ class ServerManager:
             server_id = self.default_server
         return self.servers_config.get(server_id)
     
+    def get_all_server_ids(self) -> list:
+        """모든 서버 ID 목록"""
+        return list(self.servers_config.keys())
+    
     def is_server_running(self, server_id: str) -> bool:
         """서버 실행 여부 확인"""
         if server_id not in self.running_servers:
@@ -104,7 +109,7 @@ class ServerManager:
         obj = self.running_servers[server_id]
         
         # Screen 세션인 경우
-        if isinstance(obj, str):
+        if isinstance(obj, str) and SCREEN_AVAILABLE:
             return ScreenManager.screen_exists(obj)
         
         # Popen 프로세스인 경우
@@ -113,15 +118,12 @@ class ServerManager:
         
         return False
     
+    def has_rcon(self, server_id: str) -> bool:
+        """서버가 RCON을 지원하는지 확인"""
+        return server_id in self.rcon_clients
+    
     async def start_server(self, server_id: str) -> Tuple[bool, str]:
-        """
-        서버 시작
-        
-        config.py 설정:
-        - Linux: "terminal_mode": "screen" (기본) 또는 "background"
-        - Windows: "terminal_mode": "separate" 또는 "background"
-        - macOS: "terminal_mode": "separate" 또는 "background"
-        """
+        """서버 시작"""
         try:
             if self.is_server_running(server_id):
                 return False, "서버가 이미 실행 중입니다."
@@ -146,7 +148,6 @@ class ServerManager:
             if self.terminal_launcher:
                 # terminal_mode 결정
                 if terminal_mode == "auto":
-                    # Linux면 screen, 아니면 separate
                     use_screen = (self.os_type == "Linux")
                 elif terminal_mode == "screen":
                     use_screen = True
@@ -164,7 +165,6 @@ class ServerManager:
                 
                 if success:
                     if screen_session:
-                        # Screen 세션으로 시작됨
                         self.running_servers[server_id] = screen_session
                         self.server_screen_sessions[server_id] = screen_session
                     
@@ -182,7 +182,7 @@ class ServerManager:
             return False, f"오류 발생: {e}"
     
     async def _start_background(self, server_id: str, command: str, cwd: Path) -> Tuple[bool, str]:
-        """백그라운드 모드로 서버 시작 (폴백)"""
+        """백그라운드 모드로 서버 시작"""
         try:
             log_file = self.logs_dir / f"{server_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
             
@@ -219,32 +219,30 @@ class ServerManager:
             print(f"🛑 서버 중지: {config['name']}")
             
             # Screen 세션인 경우
-            if isinstance(obj, str):
+            if isinstance(obj, str) and SCREEN_AVAILABLE:
                 screen_session = obj
                 
                 if force:
-                    # 강제 종료
                     success, message = await ScreenManager().kill_screen(screen_session)
                 else:
-                    # 정상 종료 (stop 명령어 전송)
+                    # 정상 종료
                     success, message = await ScreenManager().send_to_screen(
                         screen_session,
                         config.get('stop_command', 'stop')
                     )
                     
                     if success:
-                        # 종료될 때까지 대기 (최대 60초)
+                        # 종료 대기
                         for _ in range(60):
                             await asyncio.sleep(1)
                             if not ScreenManager.screen_exists(screen_session):
                                 break
                         
-                        # 아직 실행 중이면 강제 종료
+                        # 타임아웃 시 강제 종료
                         if ScreenManager.screen_exists(screen_session):
                             await ScreenManager().kill_screen(screen_session)
                             message += " (타임아웃으로 강제 종료)"
                 
-                # 정리
                 del self.running_servers[server_id]
                 if server_id in self.server_screen_sessions:
                     del self.server_screen_sessions[server_id]
@@ -261,19 +259,16 @@ class ServerManager:
                     if process.poll() is None:
                         process.kill()
                 else:
-                    # stop 명령어 전송
                     try:
                         stop_cmd = config.get('stop_command', 'stop')
                         process.stdin.write(f"{stop_cmd}\n".encode())
                         process.stdin.flush()
                         
-                        # 대기
                         for _ in range(60):
                             await asyncio.sleep(1)
                             if process.poll() is not None:
                                 break
                         
-                        # 타임아웃
                         if process.poll() is None:
                             process.terminate()
                             await asyncio.sleep(2)
@@ -289,12 +284,28 @@ class ServerManager:
             print(f"❌ 서버 중지 오류: {e}")
             return False, f"오류 발생: {e}"
     
+    async def restart_server(self, server_id: str) -> Tuple[bool, str]:
+        """서버 재시작"""
+        config = self.get_server_config(server_id)
+        if not config:
+            return False, f"서버 설정을 찾을 수 없습니다: {server_id}"
+        
+        print(f"🔄 서버 재시작: {config['name']}")
+        
+        if self.is_server_running(server_id):
+            success, message = await self.stop_server(server_id)
+            if not success:
+                return False, f"서버 중지 실패: {message}"
+            await asyncio.sleep(5)
+        
+        return await self.start_server(server_id)
+    
     async def send_command(self, server_id: str, command: str) -> Tuple[bool, str]:
-        """서버에 명령어 전송 (RCON > Screen > stdin 순서)"""
+        """서버에 명령어 전송 (RCON > Screen > stdin)"""
         config = self.get_server_config(server_id)
         
         # 1순위: RCON
-        if server_id in self.rcon_clients:
+        if self.has_rcon(server_id):
             try:
                 rcon = self.rcon_clients[server_id]
                 success, response = await rcon.execute_command(command)
@@ -303,14 +314,11 @@ class ServerManager:
                     print(f"📤 RCON: {command}")
                     print(f"📥 응답: {response}")
                     return True, f"```\n{response}\n```"
-                else:
-                    # RCON 실패 시 다음 방법 시도
-                    pass
             except:
                 pass
         
         # 2순위: Screen
-        if server_id in self.server_screen_sessions:
+        if server_id in self.server_screen_sessions and SCREEN_AVAILABLE:
             screen_session = self.server_screen_sessions[server_id]
             success, message = await ScreenManager().send_to_screen(screen_session, command)
             
@@ -319,7 +327,7 @@ class ServerManager:
             else:
                 return False, message
         
-        # 3순위: stdin (Popen)
+        # 3순위: stdin
         if server_id in self.running_servers:
             obj = self.running_servers[server_id]
             if isinstance(obj, subprocess.Popen):
@@ -333,7 +341,7 @@ class ServerManager:
         return False, "서버가 실행 중이 아닙니다."
     
     def get_screen_info(self, server_id: str) -> Optional[dict]:
-        """Screen 세션 정보 가져오기"""
+        """Screen 세션 정보"""
         if server_id not in self.server_screen_sessions:
             return None
         
@@ -343,11 +351,11 @@ class ServerManager:
             "session_name": screen_session,
             "attach_command": f"screen -r {screen_session}",
             "detach_keys": "Ctrl+A, D",
-            "exists": ScreenManager.screen_exists(screen_session)
+            "exists": ScreenManager.screen_exists(screen_session) if SCREEN_AVAILABLE else False
         }
     
     async def get_server_status(self, server_id: str) -> Optional[dict]:
-        """서버 상태 조회 (mcstatus)"""
+        """서버 상태 조회"""
         try:
             config = self.get_server_config(server_id)
             if not config:
@@ -370,6 +378,29 @@ class ServerManager:
         except Exception as e:
             return {"online": False, "error": str(e)}
     
+    async def get_server_performance(self, server_id: str) -> Optional[dict]:
+        """서버 성능 정보"""
+        try:
+            if not self.is_server_running(server_id):
+                return None
+            
+            obj = self.running_servers[server_id]
+            
+            # Popen 프로세스만 성능 측정 가능
+            if isinstance(obj, subprocess.Popen):
+                ps_process = psutil.Process(obj.pid)
+                
+                return {
+                    "cpu_percent": ps_process.cpu_percent(interval=1),
+                    "memory_mb": ps_process.memory_info().rss / 1024 / 1024,
+                    "memory_percent": ps_process.memory_percent(),
+                    "threads": ps_process.num_threads(),
+                    "uptime_seconds": (datetime.now() - datetime.fromtimestamp(ps_process.create_time())).total_seconds()
+                }
+        except Exception as e:
+            print(f"⚠️ 성능 정보 조회 실패: {e}")
+            return None
+    
     async def cleanup_on_shutdown(self):
         """봇 종료 시 정리"""
         print("\n🧹 서버 정리 중...")
@@ -380,93 +411,3 @@ class ServerManager:
             await self.stop_server(server_id, force=False)
         
         print("✅ 서버 정리 완료")
-    async def get_server_performance(self, server_id: str) -> Optional[dict]:
-        """서버 성능 정보 조회 (CPU, 메모리, 가동시간)"""
-        try:
-            import time  # 추가
-            
-            obj = self.running_servers.get(server_id)
-            if not obj:
-                return None
-            
-            # Screen 세션인 경우 PID 찾기
-            if isinstance(obj, str):
-                # screen 세션에서 실행 중인 java 프로세스 찾기
-                for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
-                    try:
-                        cmdline = proc.info.get('cmdline', [])
-                        if cmdline and 'java' in proc.info['name'].lower():
-                            # 서버 경로가 포함되어 있는지 확인
-                            config = self.get_server_config(server_id)
-                            if config and config['path'] in ' '.join(cmdline):
-                                pid = proc.info['pid']
-                                process = psutil.Process(pid)
-                                break
-                    except:
-                        continue
-                else:
-                    return None
-            # Popen 프로세스인 경우
-            elif isinstance(obj, subprocess.Popen):
-                try:
-                    process = psutil.Process(obj.pid)
-                except:
-                    return None
-            else:
-                return None
-            
-            # 성능 정보 수집
-            cpu_percent = process.cpu_percent(interval=0.1)
-            memory_info = process.memory_info()
-            memory_mb = memory_info.rss / 1024 / 1024
-            
-            # 전체 시스템 메모리 대비 비율
-            memory_percent = process.memory_percent()
-            
-            # 스레드 수
-            threads = process.num_threads()
-            
-            # 가동 시간 (수정됨)
-            create_time = process.create_time()
-            uptime_seconds = time.time() - create_time
-            
-            return {
-                "cpu_percent": cpu_percent,
-                "memory_mb": memory_mb,
-                "memory_percent": memory_percent,
-                "threads": threads,
-                "uptime_seconds": uptime_seconds
-            }
-            
-        except Exception as e:
-            print(f"⚠️ 성능 정보 조회 실패: {e}")
-            return None
-        
-    def get_all_server_ids(self) -> list:
-        """모든 서버 ID 목록 반환"""
-        return list(self.servers_config.keys())
-    
-    async def restart_server(self, server_id: str) -> Tuple[bool, str]:
-        """서버 재시작"""
-        config = self.get_server_config(server_id)
-        if not config:
-            return False, f"서버를 찾을 수 없습니다: {server_id}"
-        
-        # 중지
-        print(f"🔄 서버 재시작 중: {config['name']}")
-        success, stop_msg = await self.stop_server(server_id, force=False)
-        
-        if not success:
-            return False, f"중지 실패: {stop_msg}"
-        
-        # 대기
-        await asyncio.sleep(3)
-        
-        # 시작
-        success, start_msg = await self.start_server(server_id)
-        
-        if success:
-            return True, f"{config['name']} 서버가 재시작되었습니다."
-        else:
-            return False, f"시작 실패: {start_msg}"
-    
