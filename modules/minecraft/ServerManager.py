@@ -70,8 +70,45 @@ class ServerManager:
             self.terminal_launcher = None
             print(f"⚠️ 터미널 런처 없음 - 기본 모드만 사용")
         
+        # ✅ 기존 실행 중인 서버 재연결 (RCON 초기화 전에!)
+        self._reconnect_existing_servers()
+        
         # RCON 초기화
         self._init_rcon_clients()
+    
+    def _reconnect_existing_servers(self):
+        """봇 재시작 시 기존 실행 중인 서버 재연결"""
+        if self.os_type != "Linux" or not SCREEN_AVAILABLE:
+            print("⚠️ Linux Screen 환경이 아니므로 재연결 건너뜀")
+            return
+        
+        print("\n🔄 기존 실행 중인 서버 확인 중...")
+        
+        # 모든 Screen 세션 목록
+        all_screens = ScreenManager.list_screens()
+        
+        if not all_screens:
+            print("   💤 실행 중인 Screen 세션 없음")
+            return
+        
+        reconnected_count = 0
+        
+        for server_id, config in self.servers_config.items():
+            session_name = f"minecraft_{server_id}"
+            
+            # 해당 서버의 Screen 세션 찾기
+            actual_session = ScreenManager.find_screen_by_name(session_name)
+            
+            if actual_session:
+                print(f"   ♻️ 재연결: {config['name']} ({actual_session})")
+                self.running_servers[server_id] = actual_session
+                self.server_screen_sessions[server_id] = actual_session
+                reconnected_count += 1
+        
+        if reconnected_count > 0:
+            print(f"✅ {reconnected_count}개 서버 재연결 완료\n")
+        else:
+            print("   💤 재연결할 서버 없음\n")
     
     def _init_rcon_clients(self):
         """RCON 클라이언트 초기화"""
@@ -101,7 +138,7 @@ class ServerManager:
         """모든 서버 ID 목록"""
         return list(self.servers_config.keys())
     
-    def is_server_running(self, server_id: str) -> bool:  # ✅ 4칸 들여쓰기
+    def is_server_running(self, server_id: str) -> bool:
         """서버 실행 여부 확인 (프로세스 + 네트워크 포트 체크)"""
         if server_id not in self.running_servers:
             return False
@@ -126,6 +163,23 @@ class ServerManager:
                 except:
                     return False
             return True
+        
+        # Popen 프로세스인 경우
+        if isinstance(obj, subprocess.Popen):
+            return obj.poll() is None
+        
+        return False
+    
+    def is_process_running(self, server_id: str) -> bool:
+        """프로세스 실행 여부만 확인 (포트 체크 안 함)"""
+        if server_id not in self.running_servers:
+            return False
+        
+        obj = self.running_servers[server_id]
+        
+        # Screen 세션인 경우
+        if isinstance(obj, str) and SCREEN_AVAILABLE:
+            return ScreenManager.screen_exists(obj)
         
         # Popen 프로세스인 경우
         if isinstance(obj, subprocess.Popen):
@@ -426,20 +480,3 @@ class ServerManager:
             await self.stop_server(server_id, force=False)
         
         print("✅ 서버 정리 완료")
-
-    def is_process_running(self, server_id: str) -> bool:
-        """프로세스 실행 여부만 확인 (포트 체크 안 함)"""
-        if server_id not in self.running_servers:
-            return False
-        
-        obj = self.running_servers[server_id]
-        
-        # Screen 세션인 경우
-        if isinstance(obj, str) and SCREEN_AVAILABLE:
-            return ScreenManager.screen_exists(obj)
-        
-        # Popen 프로세스인 경우
-        if isinstance(obj, subprocess.Popen):
-            return obj.poll() is None
-        
-        return False
