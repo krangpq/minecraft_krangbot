@@ -1,5 +1,5 @@
 """
-마인크래프트 서버 관리 매니저 (완전 버전)
+마인크래프트 서버 관리 매니저 (완전 버전 - 디버깅 강화)
 경로: modules/minecraft/ServerManager.py
 """
 
@@ -77,7 +77,7 @@ class ServerManager:
         self._init_rcon_clients()
     
     def _reconnect_existing_servers(self):
-        """봇 재시작 시 기존 실행 중인 서버 재연결"""
+        """봇 재시작 시 기존 실행 중인 서버 재연결 (디버깅 강화)"""
         if self.os_type != "Linux" or not SCREEN_AVAILABLE:
             print("⚠️ Linux Screen 환경이 아니므로 재연결 건너뜀")
             return
@@ -86,6 +86,8 @@ class ServerManager:
         
         # 모든 Screen 세션 목록
         all_screens = ScreenManager.list_screens()
+        
+        print(f"   📋 감지된 모든 Screen 세션: {all_screens}")  # ✅ 디버깅 로그
         
         if not all_screens:
             print("   💤 실행 중인 Screen 세션 없음")
@@ -96,8 +98,12 @@ class ServerManager:
         for server_id, config in self.servers_config.items():
             session_name = f"minecraft_{server_id}"
             
+            print(f"   🔍 [{server_id}] 찾는 세션명: '{session_name}'")  # ✅ 디버깅
+            
             # 해당 서버의 Screen 세션 찾기
             actual_session = ScreenManager.find_screen_by_name(session_name)
+            
+            print(f"      → 찾은 결과: {actual_session if actual_session else 'None'}")  # ✅ 디버깅
             
             if actual_session:
                 print(f"   ♻️ 재연결: {config['name']} ({actual_session})")
@@ -106,7 +112,8 @@ class ServerManager:
                 reconnected_count += 1
         
         if reconnected_count > 0:
-            print(f"✅ {reconnected_count}개 서버 재연결 완료\n")
+            print(f"✅ {reconnected_count}개 서버 재연결 완료")
+            print(f"   등록된 서버: {list(self.running_servers.keys())}\n")
         else:
             print("   💤 재연결할 서버 없음\n")
     
@@ -155,7 +162,7 @@ class ServerManager:
             if config:
                 import socket
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.settimeout(0.5)  # ✅ 타임아웃 0.5초로 단축
+                sock.settimeout(0.3)  # ✅ 타임아웃 더 짧게
                 try:
                     result = sock.connect_ex(('localhost', config['port']))
                     sock.close()
@@ -192,7 +199,7 @@ class ServerManager:
         return server_id in self.rcon_clients
     
     async def start_server(self, server_id: str) -> Tuple[bool, str]:
-        """서버 시작"""
+        """서버 시작 (디버깅 강화)"""
         try:
             if self.is_server_running(server_id):
                 return False, "서버가 이미 실행 중입니다."
@@ -232,11 +239,25 @@ class ServerManager:
                     use_screen=use_screen
                 )
                 
-                if success:
-                    if screen_session:
-                        self.running_servers[server_id] = screen_session
-                        self.server_screen_sessions[server_id] = screen_session
+                print(f"   🔍 launch_server 결과:")
+                print(f"      성공: {success}")
+                print(f"      메시지: {message}")
+                print(f"      세션: {screen_session}")
+                
+                if success and screen_session:
+                    # ✅ running_servers에 등록
+                    self.running_servers[server_id] = screen_session
+                    self.server_screen_sessions[server_id] = screen_session
                     
+                    print(f"   ✅ running_servers에 등록: {server_id} → {screen_session}")
+                    print(f"   📋 현재 등록된 서버: {list(self.running_servers.keys())}")
+                    
+                    # 서버 시작 대기
+                    await asyncio.sleep(3)
+                    
+                    return True, message
+                elif success:
+                    # Screen 없이 시작된 경우
                     await asyncio.sleep(3)
                     return True, message
                 else:
@@ -248,6 +269,8 @@ class ServerManager:
                 
         except Exception as e:
             print(f"❌ 서버 시작 오류: {e}")
+            import traceback
+            traceback.print_exc()
             return False, f"오류 발생: {e}"
     
     async def _start_background(self, server_id: str, command: str, cwd: Path) -> Tuple[bool, str]:
@@ -277,19 +300,27 @@ class ServerManager:
             return False, f"백그라운드 시작 오류: {e}"
     
     async def stop_server(self, server_id: str, force: bool = False) -> Tuple[bool, str]:
-        """서버 중지"""
+        """서버 중지 (디버깅 강화)"""
         try:
-            if not self.is_server_running(server_id):
+            print(f"\n🛑 서버 중지 시도: {server_id}")
+            print(f"   running_servers: {list(self.running_servers.keys())}")
+            print(f"   is_process_running: {self.is_process_running(server_id)}")
+            print(f"   is_server_running: {self.is_server_running(server_id)}")
+            
+            if not self.is_process_running(server_id):
                 return False, "서버가 실행 중이 아닙니다."
             
             config = self.get_server_config(server_id)
             obj = self.running_servers[server_id]
             
-            print(f"🛑 서버 중지: {config['name']}")
+            print(f"   config: {config['name']}")
+            print(f"   obj 타입: {type(obj)}")
             
             # Screen 세션인 경우
             if isinstance(obj, str) and SCREEN_AVAILABLE:
                 screen_session = obj
+                
+                print(f"   Screen 세션으로 중지 시도: {screen_session}")
                 
                 if force:
                     success, message = await ScreenManager().kill_screen(screen_session)
@@ -302,10 +333,12 @@ class ServerManager:
                     
                     if success:
                         # 종료 대기
-                        for _ in range(60):
+                        for i in range(60):
                             await asyncio.sleep(1)
                             if not ScreenManager.screen_exists(screen_session):
                                 break
+                            if i % 10 == 0:
+                                print(f"   ⏳ 종료 대기 중... ({i}/60초)")
                         
                         # 타임아웃 시 강제 종료
                         if ScreenManager.screen_exists(screen_session):
@@ -315,6 +348,8 @@ class ServerManager:
                 del self.running_servers[server_id]
                 if server_id in self.server_screen_sessions:
                     del self.server_screen_sessions[server_id]
+                
+                print(f"   ✅ running_servers에서 제거됨")
                 
                 return True, message
             
@@ -351,6 +386,8 @@ class ServerManager:
                 
         except Exception as e:
             print(f"❌ 서버 중지 오류: {e}")
+            import traceback
+            traceback.print_exc()
             return False, f"오류 발생: {e}"
     
     async def restart_server(self, server_id: str) -> Tuple[bool, str]:
@@ -470,17 +507,6 @@ class ServerManager:
             print(f"⚠️ 성능 정보 조회 실패: {e}")
             return None
     
-    async def cleanup_on_shutdown(self):
-        """봇 종료 시 정리"""
-        print("\n🧹 서버 정리 중...")
-        
-        for server_id in list(self.running_servers.keys()):
-            config = self.get_server_config(server_id)
-            print(f"   - {config['name']} 중지 중...")
-            await self.stop_server(server_id, force=False)
-        
-        print("✅ 서버 정리 완료")
-    
     async def backup_world(self, server_id: str) -> Tuple[bool, str]:
         """월드 백업"""
         try:
@@ -530,3 +556,14 @@ class ServerManager:
         except Exception as e:
             print(f"❌ 백업 오류: {e}")
             return False, f"백업 실패: {e}"
+    
+    async def cleanup_on_shutdown(self):
+        """봇 종료 시 정리"""
+        print("\n🧹 서버 정리 중...")
+        
+        for server_id in list(self.running_servers.keys()):
+            config = self.get_server_config(server_id)
+            print(f"   - {config['name']} 중지 중...")
+            await self.stop_server(server_id, force=False)
+        
+        print("✅ 서버 정리 완료")

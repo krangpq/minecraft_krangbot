@@ -1,6 +1,6 @@
 """
 Screen 세션을 사용한 마인크래프트 서버 관리
-Linux 전용 - SSH 환경에 최적화
+Linux 전용 - SSH 환경에 최적화 (디버깅 강화)
 """
 
 import subprocess
@@ -52,7 +52,7 @@ class ScreenManager:
     @staticmethod
     async def create_screen(session_name: str, command: str, cwd: str, reuse_existing: bool = True) -> Tuple[bool, str, Optional[str]]:
         """
-        새 screen 세션 생성 및 명령어 실행
+        새 screen 세션 생성 및 명령어 실행 (디버깅 강화)
         
         Args:
             session_name: screen 세션 이름
@@ -64,14 +64,16 @@ class ScreenManager:
             (성공 여부, 메시지, 실제 세션 ID)
         """
         try:
+            print(f"   🔍 Screen 세션 생성 시작")
+            print(f"      요청 세션명: {session_name}")
+            
             # 기존 세션 확인
             existing_session = ScreenManager.find_screen_by_name(session_name)
             
             if existing_session:
                 if reuse_existing:
-                     # Screen은 있지만 내부 프로세스 확인 필요
-                    print(f"⚠️ 기존 Screen 세션 발견: {existing_session}")
-                    print(f"   새 명령어로 재시작합니다...")
+                    print(f"   ⚠️ 기존 Screen 세션 발견: {existing_session}")
+                    print(f"      새 명령어로 재시작합니다...")
                     # 기존 세션 종료
                     await ScreenManager.kill_screen(existing_session)
                     await asyncio.sleep(1)
@@ -87,24 +89,44 @@ class ScreenManager:
                 f'cd "{cwd}" && {command}'
             ]
             
+            print(f"      실행 명령: {' '.join(screen_command[:4])}...")
+            
             process = await asyncio.create_subprocess_exec(
                 *screen_command,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
             
-            await process.wait()
+            stdout, stderr = await process.wait(), None
             
-            # 세션 생성 확인 (최대 3초 대기)
-            for _ in range(6):
+            if stderr:
+                print(f"      stderr: {stderr}")
+            
+            # ✅ 세션 생성 확인 (최대 5초 대기, 0.5초 간격으로 10번 확인)
+            print(f"      ⏳ Screen 세션 등록 확인 중...")
+            actual_session = None
+            
+            for i in range(10):
                 await asyncio.sleep(0.5)
                 actual_session = ScreenManager.find_screen_by_name(session_name)
+                
                 if actual_session:
+                    print(f"      ✅ 세션 확인됨: {actual_session} (시도 {i+1}/10)")
                     return True, f"Screen 세션 생성 완료: {actual_session}", actual_session
+                else:
+                    print(f"      ⏳ 대기 중... (시도 {i+1}/10)")
             
-            return False, "Screen 세션 생성 실패", None
+            # 최종 확인
+            all_screens = ScreenManager.list_screens()
+            print(f"      ❌ 세션을 찾을 수 없습니다")
+            print(f"      현재 모든 Screen 세션: {all_screens}")
+            
+            return False, "Screen 세션 생성 실패: 세션을 찾을 수 없음", None
             
         except Exception as e:
+            print(f"   ❌ Screen 생성 오류: {e}")
+            import traceback
+            traceback.print_exc()
             return False, f"Screen 생성 오류: {e}", None
     
     @staticmethod
@@ -195,10 +217,11 @@ class ScreenManager:
             "screen -r session_name" 명령어 문자열
         """
         return f"screen -r {session_name}"
+    
     @staticmethod
     def find_screen_by_name(session_name: str) -> Optional[str]:
         """
-        Screen 세션을 이름으로 찾기 (PID.name 형식 처리)
+        Screen 세션을 이름으로 찾기 (PID.name 형식 처리) - 디버깅 강화
         
         Args:
             session_name: 찾을 세션 이름
@@ -207,6 +230,10 @@ class ScreenManager:
             전체 세션 ID (예: "12345.minecraft_main") 또는 None
         """
         screens = ScreenManager.list_screens()
+        
+        # 디버깅: 검색 과정 출력
+        # print(f"      [find_screen_by_name] 찾는 이름: '{session_name}'")
+        # print(f"      [find_screen_by_name] 모든 세션: {screens}")
         
         for screen in screens:
             # "12345.minecraft_main" 형식에서 이름 부분만 추출
@@ -218,15 +245,21 @@ class ScreenManager:
                     pid_part = parts[0]
                     name_part = parts[1]
                     
+                    # print(f"      [find_screen_by_name] 파싱: '{screen}' → PID={pid_part}, 이름={name_part}")
+                    
                     # PID가 숫자인지 확인
                     if pid_part.isdigit() and name_part == session_name:
+                        # print(f"      [find_screen_by_name] ✅ 매칭: {screen}")
                         return screen
             
             # 점이 없는 경우 (드물지만 가능)
             if screen == session_name:
+                # print(f"      [find_screen_by_name] ✅ 직접 매칭: {screen}")
                 return screen
         
+        # print(f"      [find_screen_by_name] ❌ 세션을 찾을 수 없음")
         return None
+
 
 class TerminalLauncher:
     """OS별 터미널 실행기 (Screen 통합)"""
@@ -289,7 +322,7 @@ class TerminalLauncher:
         """Linux: Screen 세션에서 서버 시작"""
         session_name = f"minecraft_{server_id}"
         
-        print(f"🖥️ Screen 세션 생성 중: {session_name}")
+        print(f"   🖥️ Screen 세션 생성 중: {session_name}")
         
         success, message, actual_session = await self.screen_manager.create_screen(
             session_name=session_name,
