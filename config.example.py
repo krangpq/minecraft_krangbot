@@ -74,6 +74,56 @@ RCON_AUTO_PASSWORD = True
 RCON_DEFAULT_PORT = 25575
 
 # ============================================
+# ☁️ GCP 인스턴스 제어 설정 (선택사항)
+# ============================================
+
+# GCP 인스턴스 제어 사용 여부
+ENABLE_GCP_CONTROL = False
+
+# GCP 프로젝트 ID
+GCP_PROJECT_ID = "your-project-id"
+
+# GCP 서비스 계정 키 파일 경로 (JSON)
+GCP_CREDENTIALS_FILE = BASE_PATH / "gcp-credentials.json"
+
+# 관리할 인스턴스 정보
+# {"인스턴스_이름": "zone"}
+GCP_INSTANCES = {
+    # 예시: 메인 마인크래프트 서버
+    # "minecraft-main-server": "asia-northeast3-a",
+}
+
+# ============================================
+# ⏰ 자동 종료 설정 (메인 서버용)
+# ============================================
+
+# 자동 종료 기능 활성화
+# True: 플레이어가 없으면 자동으로 서버 종료
+# False: 수동으로만 종료 가능
+ENABLE_AUTO_SHUTDOWN = True
+
+# 플레이어가 없을 때 대기 시간 (분)
+# 예: 30 = 30분간 플레이어 없으면 자동 종료
+# 추천: 30-60분 (너무 짧으면 잠깐 나간 플레이어가 불편)
+EMPTY_SERVER_TIMEOUT = 30
+
+# 자동 종료 전 경고 시간 (분)
+# 예: 5 = 종료 5분 전에 로그 경고
+AUTO_SHUTDOWN_WARNING_TIME = 5
+
+# GCP 인스턴스 자동 중지 여부
+# True: 모든 마인크래프트 서버 종료 시 인스턴스도 중지 (비용 절감!)
+# False: 마인크래프트만 종료, 인스턴스는 유지
+AUTO_STOP_INSTANCE = True
+
+# 자동 중지할 인스턴스 정보 (AUTO_STOP_INSTANCE=True일 때 필요)
+AUTO_SHUTDOWN_INSTANCE = {
+    "project_id": "your-project-id",
+    "name": "minecraft-main-server",
+    "zone": "asia-northeast3-a"
+}
+
+# ============================================
 # 📋 수동 서버 설정 (선택사항)
 # ============================================
 
@@ -98,8 +148,10 @@ MINECRAFT_SERVERS = {
     #     }
     # }
 }
+
 # 기본 서버 (명령어에서 서버 지정 안 할 때 사용)
 DEFAULT_SERVER = "main"
+
 # ============================================
 # 🛡️ 보안 설정
 # ============================================
@@ -181,6 +233,25 @@ servers/
   "description": "생존 서버"
 }
 
+⏰ 자동 종료 설정 예시:
+
+# 30분 후 자동 종료 + 인스턴스 중지 (권장)
+ENABLE_AUTO_SHUTDOWN = True
+EMPTY_SERVER_TIMEOUT = 30
+AUTO_STOP_INSTANCE = True
+
+# 1시간 후 자동 종료 (여유롭게)
+ENABLE_AUTO_SHUTDOWN = True
+EMPTY_SERVER_TIMEOUT = 60
+AUTO_STOP_INSTANCE = True
+
+# 자동 종료 비활성화 (수동 관리)
+ENABLE_AUTO_SHUTDOWN = False
+
+# 마인크래프트만 종료, 인스턴스는 유지
+ENABLE_AUTO_SHUTDOWN = True
+AUTO_STOP_INSTANCE = False
+
 💡 봇이 자동으로:
 1. ✅ servers/ 폴더 스캔
 2. ✅ bot_config.json 생성 (없으면)
@@ -188,12 +259,23 @@ servers/
 4. ✅ RCON 설정 (비밀번호 자동 생성)
 5. ✅ Screen 세션 생성 (Linux)
 6. ✅ 서버 시작
+7. ✅ 플레이어 없으면 자동 종료 (설정 시)
+8. ✅ GCP 인스턴스 자동 중지 (설정 시)
 
 🚀 사용 방법:
 1. servers/ 폴더에 마인크래프트 서버 복사
-2. python main.py 실행
-3. Discord에서 /서버목록 확인
-4. Discord에서 /서버시작 서버:survival
+2. config.py에서 자동 종료 설정
+3. python main.py 실행
+4. Discord에서 /서버시작
+5. 플레이 후 방치 → 자동으로 종료 + 비용 절감!
+
+☁️ GCP 인스턴스 제어 설정 방법:
+1. GCP Console에서 서비스 계정 생성
+   - 역할: Compute Engine 관리자
+2. 서비스 계정 키 (JSON) 다운로드
+3. 프로젝트 루트에 gcp-credentials.json으로 저장
+4. config.py에서 AUTO_STOP_INSTANCE = True 설정
+5. AUTO_SHUTDOWN_INSTANCE 정보 입력
 """
 
 # ============================================
@@ -238,9 +320,32 @@ if __name__ == '__main__':
     print(f"\n🔐 RCON 설정:")
     print(f"자동 비밀번호: {'활성화' if RCON_AUTO_PASSWORD else '비활성화'}")
     
+    # 자동 종료
+    print(f"\n⏰ 자동 종료:")
+    print(f"상태: {'활성화' if ENABLE_AUTO_SHUTDOWN else '비활성화'}")
+    if ENABLE_AUTO_SHUTDOWN:
+        print(f"대기 시간: {EMPTY_SERVER_TIMEOUT}분")
+        print(f"경고 시간: {AUTO_SHUTDOWN_WARNING_TIME}분 전")
+        print(f"인스턴스 중지: {'활성화' if AUTO_STOP_INSTANCE else '비활성화'}")
+        if AUTO_STOP_INSTANCE:
+            print(f"인스턴스: {AUTO_SHUTDOWN_INSTANCE.get('name', 'N/A')}")
+    
+    # GCP
+    print(f"\n☁️ GCP 인스턴스 제어:")
+    print(f"상태: {'활성화' if ENABLE_GCP_CONTROL else '비활성화'}")
+    if ENABLE_GCP_CONTROL:
+        print(f"프로젝트 ID: {GCP_PROJECT_ID}")
+        print(f"관리 인스턴스: {len(GCP_INSTANCES)}개")
+        if GCP_CREDENTIALS_FILE.exists():
+            print(f"✅ 인증 파일 존재")
+        else:
+            print(f"❌ 인증 파일 없음: {GCP_CREDENTIALS_FILE}")
+    
     print("\n" + "=" * 60)
     print("\n💡 설정 가이드:")
     print("1. TOKEN과 BOT_OWNER_ID 입력")
     print("2. servers/ 폴더에 마인크래프트 서버 복사")
-    print("3. python main.py 실행")
+    print("3. 자동 종료 설정 (ENABLE_AUTO_SHUTDOWN)")
+    print("4. (선택) GCP 인스턴스 자동 중지 설정")
+    print("5. python main.py 실행")
     print("=" * 60)

@@ -9,6 +9,7 @@ from .ServerScanner import ServerScanner
 from .ServerConfigurator import ServerConfigurator
 from .RconClient import RconClient
 from .ScreenManager import ScreenManager, TerminalLauncher
+from .PortManager import PortManager
 
 __all__ = [
     'ServerManager', 
@@ -17,5 +18,6 @@ __all__ = [
     'ServerConfigurator',
     'RconClient',
     'ScreenManager',
-    'TerminalLauncher'
+    'TerminalLauncher',
+    'PortManager'
 ]

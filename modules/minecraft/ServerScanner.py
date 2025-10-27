@@ -4,9 +4,9 @@ servers/ 폴더에서 마인크래프트 서버 자동 스캔
 """
 
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict
 from .ServerConfigurator import ServerConfigurator
-import platform
+from .PortManager import PortManager
 
 
 class ServerScanner:
@@ -16,6 +16,14 @@ class ServerScanner:
         self.servers_dir = servers_dir
         self.configurator = configurator
         self.servers_dir.mkdir(parents=True, exist_ok=True)
+        
+        # 포트 관리자 초기화
+        self.port_manager = PortManager()
+        
+        # 시스템에서 이미 리스닝 중인 포트 확인
+        listening_ports = self.port_manager.get_all_listening_ports()
+        if listening_ports:
+            print(f"🔍 현재 사용 중인 포트: {len(listening_ports)}개")
     
     def get_server_summary(self, servers: Dict[str, dict]) -> str:
         """서버 목록 요약 텍스트 생성"""
@@ -25,16 +33,19 @@ class ServerScanner:
         lines = ["등록된 서버 목록:"]
         for server_id, config in servers.items():
             status = "🆕 신규" if config.get('is_new', False) else "✅ 기존"
+            rcon_port = config.get('rcon', {}).get('port', 'N/A')
             lines.append(
                 f"  [{server_id}] {config['name']} - {status}\n"
-                f"      메모리: {config['memory']['min']}-{config['memory']['max']}MB, "
-                f"포트: {config['port']}"
+                f"      메모리: {config['memory']['min']}-{config['memory']['max']}MB\n"
+                f"      포트: {config['port']} (MC) | {rcon_port} (RCON)"
             )
         
         return "\n".join(lines)
+    
     def scan_all_servers(self) -> Dict[str, dict]:
         """
         servers/ 폴더의 모든 하위 폴더를 스캔하여 서버 목록 생성
+        포트는 자동으로 할당됩니다.
         
         Returns:
             {server_id: server_config, ...}
@@ -42,8 +53,6 @@ class ServerScanner:
         print(f"\n🔍 서버 폴더 스캔 중: {self.servers_dir}")
         
         servers = {}
-        used_ports = set()  # 사용 중인 포트 추적
-        used_rcon_ports = set()  # 사용 중인 RCON 포트 추적
         
         # servers/ 폴더의 모든 하위 디렉토리 스캔
         for folder in self.servers_dir.iterdir():
@@ -65,41 +74,53 @@ class ServerScanner:
                 print(f"⚠️ 스킵: {message}")
                 continue
             
-            # 서버 설정 준비 (is_running 전달)
-            success, prep_message, server_config = self.configurator.prepare_server(
-                folder)
+            # 서버 설정 준비
+            success, prep_message, server_config = self.configurator.prepare_server(folder)
             
             if not success:
                 print(f"❌ 설정 실패: {prep_message}")
                 continue
             
-            # 포트 충돌 확인 및 해결
-            server_port = server_config['port']
-            if server_port in used_ports:
-                # 포트 충돌 시 자동으로 다음 포트 할당
-                new_port = server_port
-                while new_port in used_ports:
-                    new_port += 1
-                print(f"⚠️ 포트 충돌 감지: {server_port} -> {new_port}로 변경")
-                server_config['port'] = new_port
-            used_ports.add(server_config['port'])
+            # ===== 포트 자동 할당 =====
             
-            # RCON 포트 충돌 확인 및 해결
-            rcon_port = server_config['rcon']['port']
-            if rcon_port in used_rcon_ports:
-                # RCON 포트 충돌 시 자동으로 다음 포트 할당
-                new_rcon_port = rcon_port
-                while new_rcon_port in used_rcon_ports or new_rcon_port in used_ports:
-                    new_rcon_port += 1
-                print(f"⚠️ RCON 포트 충돌 감지: {rcon_port} -> {new_rcon_port}로 변경")
-                server_config['rcon']['port'] = new_rcon_port
-                # server.properties도 업데이트
-                self.configurator.setup_rcon(
-                    folder,
-                    new_rcon_port,
-                    server_config['rcon']['password']
+            # 1. server.properties에서 기존 포트 읽기
+            existing_port = self.configurator.get_server_port(folder)
+            
+            # 2. 마인크래프트 포트 할당
+            try:
+                # 기존 포트가 사용 가능하면 그대로 사용
+                mc_port = self.port_manager.find_minecraft_port(prefer_port=existing_port)
+                server_config['port'] = mc_port
+                print(f"   ✅ 마인크래프트 포트: {mc_port}")
+            except RuntimeError as e:
+                print(f"   ❌ 포트 할당 실패: {e}")
+                continue
+            
+            # 3. RCON 포트 할당
+            try:
+                rcon_port = server_config.get('rcon', {}).get('port', 25575)
+                new_rcon_port = self.port_manager.find_rcon_port(
+                    mc_port=mc_port,
+                    prefer_port=rcon_port
                 )
-            used_rcon_ports.add(server_config['rcon']['port'])
+                server_config['rcon']['port'] = new_rcon_port
+                print(f"   ✅ RCON 포트: {new_rcon_port}")
+                
+                # RCON 설정 업데이트
+                rcon_password = server_config['rcon']['password']
+                self.configurator.setup_rcon(folder, new_rcon_port, rcon_password)
+                
+            except RuntimeError as e:
+                print(f"   ❌ RCON 포트 할당 실패: {e}")
+                # RCON 실패해도 서버는 등록 (RCON 비활성화)
+                server_config['rcon']['enabled'] = False
+            
+            # ===== 포트 할당 끝 =====
+            
+            # server.properties에 할당된 포트 저장
+            if mc_port != existing_port:
+                self.configurator.set_server_port(folder, mc_port)
+                print(f"   📝 server.properties 업데이트: 포트 {mc_port}")
             
             # 서버 ID 추가
             server_config['id'] = server_id
@@ -120,4 +141,4 @@ class ServerScanner:
         
         print(f"\n📊 총 {len(servers)}개 서버 발견\n")
         
-        return servers  # ✅ 이 줄의 들여쓰기가 함수 레벨이어야 함!
+        return servers
