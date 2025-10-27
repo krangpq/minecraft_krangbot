@@ -446,3 +446,368 @@ def setup_commands(bot):
             await interaction.followup.send(f"✅ {message}")
         else:
             await interaction.followup.send(f"❌ {message}")
+
+        @bot.tree.command(name="제어채널연결", description="[관리자] 컨트롤러 봇과 제어 채널을 연결합니다")
+        @app_commands.describe(
+            채널="컨트롤러 봇이 생성한 제어 채널",
+            컨트롤러봇아이디="컨트롤러 봇의 Discord ID"
+        )
+        async def connect_control_channel(
+            interaction: discord.Interaction,
+            채널: discord.TextChannel,
+            컨트롤러봇아이디: str
+        ):
+            """제어 채널 연결"""
+            if not bot.is_authorized(interaction.user, "administrator"):
+                await interaction.response.send_message(
+                    "❌ 이 명령어는 **관리자** 권한이 필요합니다.",
+                    ephemeral=True
+                )
+                return
+            
+            await interaction.response.defer(ephemeral=True)
+            
+            try:
+                controller_id = int(컨트롤러봇아이디)
+            except ValueError:
+                await interaction.followup.send("❌ 올바른 봇 ID를 입력하세요 (숫자만)")
+                return
+            
+            # config 업데이트
+            from datetime import datetime
+            bot.config.update(
+                control_channel_id=채널.id,
+                controller_bot_id=controller_id,
+                enable_gcp_control=True,
+                created_at=datetime.now().isoformat()
+            )
+            
+            # GCP 컨트롤러 초기화
+            from modules.gcp import GCPController
+            bot.gcp_controller = GCPController(bot, 채널.id, controller_id)
+            
+            # 연결 테스트
+            await interaction.followup.send("🔄 연결 테스트 중...")
+            
+            connection_ok = await bot.gcp_controller.test_connection()
+            
+            embed = discord.Embed(
+                title="✅ 제어 채널 연결 완료" if connection_ok else "⚠️ 제어 채널 연결됨 (응답 없음)",
+                description=f"제어 채널: {채널.mention}",
+                color=discord.Color.green() if connection_ok else discord.Color.orange()
+            )
+            
+            embed.add_field(
+                name="🤖 컨트롤러 봇",
+                value=f"ID: `{controller_id}`",
+                inline=False
+            )
+            
+            if connection_ok:
+                embed.add_field(
+                    name="✅ 연결 상태",
+                    value="컨트롤러 봇과 정상적으로 통신합니다.",
+                    inline=False
+                )
+            else:
+                embed.add_field(
+                    name="⚠️ 연결 상태",
+                    value=(
+                        "컨트롤러 봇이 응답하지 않습니다.\n"
+                        "• 컨트롤러 봇이 실행 중인지 확인하세요\n"
+                        "• `/제어기능토글`로 기능을 활성화했는지 확인하세요"
+                    ),
+                    inline=False
+                )
+            
+            embed.add_field(
+                name="📋 사용 가능한 명령어",
+                value=(
+                    "• `/자동종료` - 마크 서버 + GCP 자동 종료\n"
+                    "• `/gcp상태확인` - GCP 인스턴스 상태 확인\n"
+                    "• `/제어기능상태` - 현재 설정 확인"
+                ),
+                inline=False
+            )
+            
+            embed.set_footer(text=f"설정 파일: {bot.config.config_file}")
+            
+            await interaction.followup.send(embed=embed)
+            
+            # 제어 채널에 연결 알림
+            await 채널.send(
+                f"🤝 **마인크래프트 봇 연결됨**\n"
+                f"봇: {bot.user.name}\n"
+                f"봇 ID: `{bot.user.id}`\n"
+                f"GCP 인스턴스: `{bot.config.get('gcp_instance_name')}`\n"
+                f"상태: 🟢 연결됨"
+            )
+            
+            print(f"✅ 제어 채널 연결: #{채널.name} (ID: {채널.id})")
+            print(f"✅ 컨트롤러 봇 ID: {controller_id}")
+
+        @bot.tree.command(name="제어채널해제", description="[관리자] 제어 채널 연결을 해제합니다")
+        async def disconnect_control_channel(interaction: discord.Interaction):
+            """제어 채널 연결 해제"""
+            if not bot.is_authorized(interaction.user, "administrator"):
+                await interaction.response.send_message(
+                    "❌ 이 명령어는 **관리자** 권한이 필요합니다.",
+                    ephemeral=True
+                )
+                return
+            
+            control_channel_id = bot.config.get('control_channel_id')
+            
+            if not control_channel_id:
+                await interaction.response.send_message(
+                    "ℹ️ 연결된 제어 채널이 없습니다.",
+                    ephemeral=True
+                )
+                return
+            
+            # 제어 채널에 해제 알림
+            try:
+                channel = bot.get_channel(control_channel_id)
+                if channel:
+                    await channel.send(
+                        f"👋 **마인크래프트 봇 연결 해제**\n"
+                        f"봇: {bot.user.name}\n"
+                        f"상태: 🔴 연결 해제됨"
+                    )
+            except:
+                pass
+            
+            # 설정 초기화
+            bot.config.reset()
+            bot.gcp_controller = None
+            
+            await interaction.response.send_message(
+                "✅ 제어 채널 연결이 해제되었습니다.",
+                ephemeral=True
+            )
+            
+            print(f"🔄 제어 채널 연결 해제")
+
+        @bot.tree.command(name="제어기능상태", description="GCP 제어 기능 상태를 확인합니다")
+        async def control_status(interaction: discord.Interaction):
+            """제어 기능 상태 확인"""
+            embed = discord.Embed(
+                title="📊 GCP 제어 기능 상태",
+                color=discord.Color.blue() if bot.config.get('enable_gcp_control') else discord.Color.red()
+            )
+            
+            # 설정 요약
+            embed.add_field(
+                name="⚙️ 설정",
+                value=bot.config.export_summary(),
+                inline=False
+            )
+            
+            # 제어 채널 상태
+            control_channel_id = bot.config.get('control_channel_id')
+            if control_channel_id:
+                channel = bot.get_channel(control_channel_id)
+                if channel:
+                    embed.add_field(
+                        name="📡 제어 채널",
+                        value=f"✅ {channel.mention}",
+                        inline=True
+                    )
+                else:
+                    embed.add_field(
+                        name="📡 제어 채널",
+                        value=f"❌ 채널을 찾을 수 없음\n(ID: {control_channel_id})",
+                        inline=True
+                    )
+            else:
+                embed.add_field(
+                    name="📡 제어 채널",
+                    value="❌ 미설정",
+                    inline=True
+                )
+            
+            # 컨트롤러 봇 상태
+            controller_id = bot.config.get('controller_bot_id')
+            if controller_id:
+                try:
+                    controller = await bot.fetch_user(controller_id)
+                    embed.add_field(
+                        name="🤖 컨트롤러 봇",
+                        value=f"✅ {controller.name}\n(ID: `{controller_id}`)",
+                        inline=True
+                    )
+                except:
+                    embed.add_field(
+                        name="🤖 컨트롤러 봇",
+                        value=f"⚠️ ID: `{controller_id}`\n(봇을 찾을 수 없음)",
+                        inline=True
+                    )
+            else:
+                embed.add_field(
+                    name="🤖 컨트롤러 봇",
+                    value="❌ 미연결",
+                    inline=True
+                )
+            
+            # GCP 인스턴스 정보
+            embed.add_field(
+                name="☁️ GCP 인스턴스",
+                value=f"`{bot.config.get('gcp_instance_name')}`",
+                inline=False
+            )
+            
+            # 연결 테스트 버튼
+            if bot.config.get('enable_gcp_control') and bot.gcp_controller:
+                embed.add_field(
+                    name="🧪 연결 테스트",
+                    value="제어 채널에 `!ping`을 입력하여 연결을 테스트하세요.",
+                    inline=False
+                )
+            
+            if not bot.config.get('enable_gcp_control'):
+                embed.add_field(
+                    name="💡 활성화 방법",
+                    value="관리자가 `/제어채널연결` 명령어를 사용하세요",
+                    inline=False
+                )
+            
+            embed.set_footer(text=f"설정 파일: {bot.config.config_file}")
+            
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+
+        @bot.tree.command(name="자동종료", description="모든 마크 서버를 정리하고 GCP 인스턴스까지 자동 종료")
+        async def auto_shutdown(interaction: discord.Interaction):
+            """완전 자동화된 종료 프로세스"""
+            if not bot.is_authorized(interaction.user, "manage_guild"):
+                await interaction.response.send_message(
+                    "❌ 이 명령어는 **서버 관리** 권한이 필요합니다.",
+                    ephemeral=True
+                )
+                return
+            
+            # GCP 제어 기능 확인
+            if not bot.config.get('enable_gcp_control') or not bot.gcp_controller:
+                await interaction.response.send_message(
+                    "❌ GCP 제어 기능이 비활성화되어 있습니다.\n"
+                    "관리자에게 `/제어채널연결`을 요청하세요.",
+                    ephemeral=True
+                )
+                return
+            
+            await interaction.response.defer()
+            
+            embed = discord.Embed(
+                title="🔄 자동 종료 프로세스 시작",
+                color=discord.Color.orange()
+            )
+            
+            # 1단계: 실행 중인 서버 확인
+            running_servers = []
+            for server_id in bot.mc.get_all_server_ids():
+                if bot.mc.is_server_running(server_id):
+                    running_servers.append(server_id)
+            
+            if not running_servers:
+                embed.add_field(
+                    name="1️⃣ 마인크래프트 서버",
+                    value="✅ 실행 중인 서버 없음",
+                    inline=False
+                )
+            else:
+                embed.add_field(
+                    name="1️⃣ 마인크래프트 서버 중지 중...",
+                    value=f"대상: {', '.join(running_servers)}",
+                    inline=False
+                )
+            
+            await interaction.followup.send(embed=embed)
+            
+            # 2단계: 각 서버 중지
+            for server_id in running_servers:
+                config = bot.mc.get_server_config(server_id)
+                success, message = await bot.mc.stop_server(server_id)
+                
+                status = "✅" if success else "❌"
+                await interaction.followup.send(f"{status} {config['name']}: {message}")
+                
+                await asyncio.sleep(2)
+            
+            # 모든 서버 중지 대기
+            if running_servers:
+                await interaction.followup.send("⏳ 서버 종료 완료 대기 중... (10초)")
+                await asyncio.sleep(10)
+            
+            # 3단계: GCP 인스턴스 중지 요청
+            await interaction.followup.send("☁️ **GCP 인스턴스 중지 요청 중...**")
+            
+            instance_name = bot.config.get('gcp_instance_name', 'minecraft-main-server')
+            
+            success, response = await bot.gcp_controller.send_shutdown_request(
+                instance=instance_name,
+                reason="자동 종료 프로세스"
+            )
+            
+            if success:
+                final_embed = discord.Embed(
+                    title="✅ 자동 종료 완료",
+                    description=(
+                        "모든 마인크래프트 서버가 정상 종료되었으며,\n"
+                        "GCP 인스턴스도 중지되었습니다.\n\n"
+                        "💰 비용 절감 모드 활성화!"
+                    ),
+                    color=discord.Color.green()
+                )
+                
+                final_embed.add_field(
+                    name="📋 요약",
+                    value=(
+                        f"• 마크 서버: {len(running_servers)}개 중지\n"
+                        f"• GCP 인스턴스: `{instance_name}` 중지\n"
+                    ),
+                    inline=False
+                )
+                
+                await interaction.followup.send(embed=final_embed)
+            else:
+                await interaction.followup.send(
+                    f"⚠️ GCP 인스턴스 중지 실패\n{response}\n\n"
+                    f"수동으로 VPN 서버 봇에서 `/인스턴스중지` 명령어를 사용하세요."
+                )
+
+        @bot.tree.command(name="gcp상태확인", description="GCP 인스턴스 상태를 확인합니다")
+        async def check_gcp_status(interaction: discord.Interaction):
+            """GCP 인스턴스 상태 확인"""
+            
+            # GCP 제어 기능 확인
+            if not bot.config.get('enable_gcp_control') or not bot.gcp_controller:
+                await interaction.response.send_message(
+                    "❌ GCP 제어 기능이 비활성화되어 있습니다.\n"
+                    "관리자에게 `/제어채널연결`을 요청하세요.",
+                    ephemeral=True
+                )
+                return
+            
+            await interaction.response.defer()
+            
+            instance_name = bot.config.get('gcp_instance_name', 'minecraft-main-server')
+            
+            success, response = await bot.gcp_controller.check_status(instance_name)
+            
+            embed = discord.Embed(
+                title=f"☁️ GCP 인스턴스 상태: {instance_name}",
+                description=response if success else "⚠️ 상태 확인 실패",
+                color=discord.Color.blue() if success else discord.Color.red()
+            )
+            
+            if not success:
+                embed.add_field(
+                    name="💡 해결 방법",
+                    value=(
+                        "• 컨트롤러 봇이 실행 중인지 확인\n"
+                        "• VPN 서버에서 `/제어기능토글` 확인\n"
+                        "• `/제어기능상태`로 연결 상태 확인"
+                    ),
+                    inline=False
+                )
+            
+            await interaction.followup.send(embed=embed)

@@ -349,3 +349,19 @@ if __name__ == '__main__':
     print("4. (선택) GCP 인스턴스 자동 중지 설정")
     print("5. python main.py 실행")
     print("=" * 60)
+
+# ============================================
+# 🔗 봇 간 통신 설정 (GCP 제어용)
+# ============================================
+
+# GCP 제어 기능 활성화 여부 (기본값 - 런타임에 변경됨)
+ENABLE_GCP_CONTROL = False
+
+# 제어 채널 ID (자동 설정됨)
+CONTROL_CHANNEL_ID = None
+
+# 컨트롤러 봇의 Discord ID (자동 설정됨)
+CONTROLLER_BOT_ID = None
+
+# GCP 인스턴스 이름
+GCP_INSTANCE_NAME = "minecraft-main-server"
