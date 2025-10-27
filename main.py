@@ -29,11 +29,15 @@ from config import (
     AUTO_SHUTDOWN_WARNING_TIME,
     AUTO_STOP_INSTANCE,
     AUTO_SHUTDOWN_INSTANCE,
-    GCP_CREDENTIALS_FILE
+    GCP_CREDENTIALS_FILE,
+    # GCP 환경 설정
+    IS_GCP_ENVIRONMENT,
+    ENABLE_GCP_CONTROL,
+    GCP_INSTANCE_NAME,
 )
 
 # 유틸리티 함수 import
-from utils import is_authorized
+from utils import is_authorized, ConfigManager
 
 # 마인크래프트 모듈 import
 from modules.minecraft import (
@@ -63,10 +67,15 @@ class MinecraftBot(commands.Bot):
             default_server=self._get_default_server(servers_config)
         )
         
-        # GCP 인스턴스 제어 (자동 종료용)
-        self.gcp = None
-        if ENABLE_AUTO_SHUTDOWN and AUTO_STOP_INSTANCE:
-            self._init_gcp_for_shutdown()
+        # GCP 제어 기능 초기화 (GCP 환경에서만)
+        self.gcp_controller = None
+        self.config = None
+        
+        if IS_GCP_ENVIRONMENT and ENABLE_GCP_CONTROL:
+            print("\n🌍 GCP 환경 감지됨")
+            self._init_gcp_control()
+        else:
+            print("\n💻 로컬 환경 - GCP 제어 기능 비활성화")
         
         # 자동 종료 상태 추적
         self.empty_since = {}  # {server_id: datetime}
@@ -76,31 +85,35 @@ class MinecraftBot(commands.Bot):
         signal.signal(signal.SIGINT, self.signal_handler)
         signal.signal(signal.SIGTERM, self.signal_handler)
     
-    def _init_gcp_for_shutdown(self):
-        """GCP 인스턴스 자동 중지를 위한 초기화"""
+    def _init_gcp_control(self):
+        """GCP 제어 기능 초기화 (GCP 환경에서만)"""
         try:
-            if GCP_CREDENTIALS_FILE.exists():
-                os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = str(GCP_CREDENTIALS_FILE)
+            # ConfigManager 초기화
+            self.config = ConfigManager("bot_runtime_config.json")
             
-            from google.cloud import compute_v1
-            self.gcp_client = compute_v1.InstancesClient()
-            self.gcp_project = AUTO_SHUTDOWN_INSTANCE.get('project_id')
-            self.gcp_instance = AUTO_SHUTDOWN_INSTANCE.get('name')
-            self.gcp_zone = AUTO_SHUTDOWN_INSTANCE.get('zone')
+            # 저장된 설정 확인
+            control_channel_id = self.config.get('control_channel_id')
+            controller_bot_id = self.config.get('controller_bot_id')
+            enable_gcp = self.config.get('enable_gcp_control')
             
-            if not all([self.gcp_project, self.gcp_instance, self.gcp_zone]):
-                print("⚠️ AUTO_SHUTDOWN_INSTANCE 설정이 불완전합니다.")
-                print("   config.py에서 project_id, name, zone을 모두 설정하세요.")
-                self.gcp_client = None
-                return
-            
-            print("✅ GCP 자동 중지 기능 활성화")
-            print(f"   인스턴스: {self.gcp_instance}")
-            
+            if enable_gcp and control_channel_id and controller_bot_id:
+                # GCPController 초기화
+                from modules.gcp import GCPController
+                self.gcp_controller = GCPController(
+                    bot=self,
+                    control_channel_id=control_channel_id,
+                    controller_bot_id=controller_bot_id
+                )
+                print(f"✅ GCP 제어 기능 활성화")
+                print(f"   제어 채널: {control_channel_id}")
+                print(f"   컨트롤러 봇: {controller_bot_id}")
+            else:
+                print(f"⚠️ GCP 제어 기능 미설정")
+                print(f"   `/제어채널연결` 명령어를 사용하여 설정하세요")
+        
         except Exception as e:
-            print(f"⚠️ GCP 자동 중지 초기화 실패: {e}")
-            print("   자동 종료는 작동하지만 인스턴스는 수동으로 중지해야 합니다.")
-            self.gcp_client = None
+            print(f"⚠️ GCP 제어 초기화 오류: {e}")
+            self.gcp_controller = None
     
     def _prepare_servers(self) -> dict:
         """서버 설정 준비 (자동 스캔 또는 수동 설정)"""
@@ -237,8 +250,8 @@ class MinecraftBot(commands.Bot):
             if success:
                 print(f"✅ [{server_id}] 서버 중지 완료")
                 
-                # GCP 인스턴스 자동 중지
-                if AUTO_STOP_INSTANCE and hasattr(self, 'gcp_client') and self.gcp_client:
+                # GCP 인스턴스 자동 중지 (GCP 환경에서만)
+                if AUTO_STOP_INSTANCE and self.gcp_controller:
                     # 모든 마인크래프트 서버가 중지되었는지 확인
                     all_stopped = True
                     for sid in self.mc.get_all_server_ids():
@@ -264,23 +277,30 @@ class MinecraftBot(commands.Bot):
             print(f"❌ 자동 종료 오류: {e}")
     
     async def stop_gcp_instance(self):
-        """GCP 인스턴스 중지"""
+        """GCP 인스턴스 중지 요청"""
         try:
-            print(f"⏳ GCP 인스턴스 중지 중: {self.gcp_instance}")
+            if not self.gcp_controller:
+                print(f"⚠️ GCP 컨트롤러가 초기화되지 않았습니다")
+                return
             
-            await asyncio.to_thread(
-                self.gcp_client.stop,
-                project=self.gcp_project,
-                zone=self.gcp_zone,
-                instance=self.gcp_instance
+            instance_name = self.config.get('gcp_instance_name', GCP_INSTANCE_NAME)
+            
+            print(f"⏳ GCP 인스턴스 중지 요청: {instance_name}")
+            
+            success, response = await self.gcp_controller.send_shutdown_request(
+                instance=instance_name,
+                reason="자동 종료 - 모든 서버 비활성"
             )
             
-            print(f"✅ GCP 인스턴스 중지 요청 완료")
-            print(f"💰 컴퓨팅 비용 절감 시작!")
-            
+            if success:
+                print(f"✅ GCP 인스턴스 중지 요청 완료")
+                print(f"💰 컴퓨팅 비용 절감 시작!")
+            else:
+                print(f"❌ GCP 인스턴스 중지 실패: {response}")
+                print(f"💡 VPN 서버에서 수동으로 `/인스턴스중지` 명령어를 사용하세요")
+        
         except Exception as e:
-            print(f"❌ GCP 인스턴스 중지 실패: {e}")
-            print(f"💡 Discord에서 /인스턴스중지 명령어를 사용하세요")
+            print(f"❌ GCP 인스턴스 중지 오류: {e}")
     
     async def on_ready(self):
         """봇 준비 완료"""
@@ -299,6 +319,8 @@ class MinecraftBot(commands.Bot):
             activity=discord.Game("마인크래프트 서버 관리 🎮")
         )
         
+        print(f"\n🌍 환경: {'GCP' if IS_GCP_ENVIRONMENT else '로컬'}")
+        
         print(f"\n📋 관리 중인 서버: {len(self.mc.servers_config)}개")
         for server_id, config in self.mc.servers_config.items():
             status = "🟢" if self.mc.is_process_running(server_id) else "🔴"
@@ -313,7 +335,13 @@ class MinecraftBot(commands.Bot):
         if ENABLE_AUTO_SHUTDOWN:
             print(f"\n⏰ 자동 종료: 활성화 ({EMPTY_SERVER_TIMEOUT}분 대기)")
             if AUTO_STOP_INSTANCE:
-                print(f"☁️ GCP 자동 중지: 활성화")
+                print(f"☁️ GCP 자동 중지: {'활성화' if IS_GCP_ENVIRONMENT else '비활성화 (로컬 환경)'}")
+        
+        if IS_GCP_ENVIRONMENT:
+            if self.gcp_controller:
+                print(f"\n☁️ GCP 제어: ✅ 연결됨")
+            else:
+                print(f"\n☁️ GCP 제어: ⚠️ 미설정 - `/제어채널연결` 사용")
         
         print("\n" + "="*60)
         print("🚀 봇이 준비되었습니다!")
