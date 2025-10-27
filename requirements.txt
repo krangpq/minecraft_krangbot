@@ -9,3 +9,6 @@ mcrcon>=0.7.0
 
 # 시스템 모니터링
 psutil>=5.9.0
+
+# HTTP 요청 (GCP 메타데이터)
+requests>=2.31.0

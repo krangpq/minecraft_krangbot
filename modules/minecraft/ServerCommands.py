@@ -6,6 +6,7 @@
 import discord
 from discord import app_commands
 from typing import Optional
+import asyncio
 
 
 def setup_commands(bot):
@@ -38,6 +39,10 @@ def setup_commands(bot):
         except Exception as e:
             print(f"⚠️ 자동완성 오류: {e}")
             return []
+    
+    # ========================================
+    # 기본 명령어 (모든 환경)
+    # ========================================
     
     @bot.tree.command(name="서버시작", description="마인크래프트 서버를 시작합니다")
     @app_commands.describe(서버="시작할 서버 (기본: 메인 서버)")
@@ -426,6 +431,7 @@ def setup_commands(bot):
         embed.set_footer(text="💡 Discord에서는 /명령어실행 또는 RCON 사용을 권장합니다")
         
         await interaction.response.send_message(embed=embed)
+    
     @bot.tree.command(name="백업", description="서버 월드 백업")
     @app_commands.describe(서버="백업할 서버")
     @app_commands.autocomplete(서버=server_autocomplete)
@@ -446,7 +452,17 @@ def setup_commands(bot):
             await interaction.followup.send(f"✅ {message}")
         else:
             await interaction.followup.send(f"❌ {message}")
-
+    
+    # ========================================
+    # GCP 전용 명령어 (GCP 환경에서만 등록)
+    # ========================================
+    
+    # GCP 환경 감지
+    from config import IS_GCP_ENVIRONMENT, ENABLE_GCP_CONTROL
+    
+    if IS_GCP_ENVIRONMENT and ENABLE_GCP_CONTROL:
+        print("✅ GCP 제어 명령어 등록 중...")
+        
         @bot.tree.command(name="제어채널연결", description="[관리자] 컨트롤러 봇과 제어 채널을 연결합니다")
         @app_commands.describe(
             채널="컨트롤러 봇이 생성한 제어 채널",
@@ -475,10 +491,13 @@ def setup_commands(bot):
             
             # config 업데이트
             from datetime import datetime
+            from config import GCP_INSTANCE_NAME
+            
             bot.config.update(
                 control_channel_id=채널.id,
                 controller_bot_id=controller_id,
                 enable_gcp_control=True,
+                gcp_instance_name=GCP_INSTANCE_NAME,
                 created_at=datetime.now().isoformat()
             )
             
@@ -545,13 +564,20 @@ def setup_commands(bot):
             
             print(f"✅ 제어 채널 연결: #{채널.name} (ID: {채널.id})")
             print(f"✅ 컨트롤러 봇 ID: {controller_id}")
-
+        
         @bot.tree.command(name="제어채널해제", description="[관리자] 제어 채널 연결을 해제합니다")
         async def disconnect_control_channel(interaction: discord.Interaction):
             """제어 채널 연결 해제"""
             if not bot.is_authorized(interaction.user, "administrator"):
                 await interaction.response.send_message(
                     "❌ 이 명령어는 **관리자** 권한이 필요합니다.",
+                    ephemeral=True
+                )
+                return
+            
+            if not bot.config:
+                await interaction.response.send_message(
+                    "ℹ️ 설정이 초기화되지 않았습니다.",
                     ephemeral=True
                 )
                 return
@@ -587,10 +613,18 @@ def setup_commands(bot):
             )
             
             print(f"🔄 제어 채널 연결 해제")
-
+        
         @bot.tree.command(name="제어기능상태", description="GCP 제어 기능 상태를 확인합니다")
         async def control_status(interaction: discord.Interaction):
             """제어 기능 상태 확인"""
+            if not bot.config:
+                await interaction.response.send_message(
+                    "⚠️ 설정이 초기화되지 않았습니다.\n"
+                    "관리자가 `/제어채널연결`을 실행하세요.",
+                    ephemeral=True
+                )
+                return
+            
             embed = discord.Embed(
                 title="📊 GCP 제어 기능 상태",
                 color=discord.Color.blue() if bot.config.get('enable_gcp_control') else discord.Color.red()
@@ -674,7 +708,7 @@ def setup_commands(bot):
             embed.set_footer(text=f"설정 파일: {bot.config.config_file}")
             
             await interaction.response.send_message(embed=embed, ephemeral=True)
-
+        
         @bot.tree.command(name="자동종료", description="모든 마크 서버를 정리하고 GCP 인스턴스까지 자동 종료")
         async def auto_shutdown(interaction: discord.Interaction):
             """완전 자동화된 종료 프로세스"""
@@ -686,7 +720,7 @@ def setup_commands(bot):
                 return
             
             # GCP 제어 기능 확인
-            if not bot.config.get('enable_gcp_control') or not bot.gcp_controller:
+            if not bot.config or not bot.config.get('enable_gcp_control') or not bot.gcp_controller:
                 await interaction.response.send_message(
                     "❌ GCP 제어 기능이 비활성화되어 있습니다.\n"
                     "관리자에게 `/제어채널연결`을 요청하세요.",
@@ -740,7 +774,8 @@ def setup_commands(bot):
             # 3단계: GCP 인스턴스 중지 요청
             await interaction.followup.send("☁️ **GCP 인스턴스 중지 요청 중...**")
             
-            instance_name = bot.config.get('gcp_instance_name', 'minecraft-main-server')
+            from config import GCP_INSTANCE_NAME
+            instance_name = bot.config.get('gcp_instance_name', GCP_INSTANCE_NAME)
             
             success, response = await bot.gcp_controller.send_shutdown_request(
                 instance=instance_name,
@@ -773,13 +808,13 @@ def setup_commands(bot):
                     f"⚠️ GCP 인스턴스 중지 실패\n{response}\n\n"
                     f"수동으로 VPN 서버 봇에서 `/인스턴스중지` 명령어를 사용하세요."
                 )
-
+        
         @bot.tree.command(name="gcp상태확인", description="GCP 인스턴스 상태를 확인합니다")
         async def check_gcp_status(interaction: discord.Interaction):
             """GCP 인스턴스 상태 확인"""
             
             # GCP 제어 기능 확인
-            if not bot.config.get('enable_gcp_control') or not bot.gcp_controller:
+            if not bot.config or not bot.config.get('enable_gcp_control') or not bot.gcp_controller:
                 await interaction.response.send_message(
                     "❌ GCP 제어 기능이 비활성화되어 있습니다.\n"
                     "관리자에게 `/제어채널연결`을 요청하세요.",
@@ -789,7 +824,8 @@ def setup_commands(bot):
             
             await interaction.response.defer()
             
-            instance_name = bot.config.get('gcp_instance_name', 'minecraft-main-server')
+            from config import GCP_INSTANCE_NAME
+            instance_name = bot.config.get('gcp_instance_name', GCP_INSTANCE_NAME)
             
             success, response = await bot.gcp_controller.check_status(instance_name)
             
@@ -811,3 +847,7 @@ def setup_commands(bot):
                 )
             
             await interaction.followup.send(embed=embed)
+        
+        print("✅ GCP 제어 명령어 등록 완료")
+    else:
+        print("ℹ️ 로컬 환경 - GCP 제어 명령어 미등록")
