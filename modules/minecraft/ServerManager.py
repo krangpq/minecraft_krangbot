@@ -201,9 +201,15 @@ class ServerManager:
     async def start_server(self, server_id: str) -> Tuple[bool, str]:
         """서버 시작 (디버깅 강화)"""
         try:
+            # ✅ 1단계: 프로세스/Screen 세션 체크 (빠름)
+            if self.is_process_running(server_id):
+                config = self.get_server_config(server_id)
+                return False, f"⚠️ {config['name']} 서버가 이미 실행 중입니다.\n💡 서버 시작 중이라면 잠시 기다려주세요."
+            
+            # ✅ 2단계: 포트까지 열렸는지 확인 (느림)
             if self.is_server_running(server_id):
                 return False, "서버가 이미 실행 중입니다."
-            
+                
             config = self.get_server_config(server_id)
             if not config:
                 return False, f"서버 설정을 찾을 수 없습니다: {server_id}"
