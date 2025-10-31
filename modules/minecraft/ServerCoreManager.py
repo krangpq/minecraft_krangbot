@@ -74,7 +74,7 @@ class ServerCoreManager:
             print(f"  Spigot {version} 빌드 대기열 추가")
     
     async def _build_spigot_background(self, version: str):
-        """Spigot Screen 세션 빌드"""
+        """Spigot Screen 세션 빌드 (수정됨)"""
         try:
             print(f"\n[Spigot {version}] 빌드 시작")
             
@@ -132,11 +132,9 @@ class ServerCoreManager:
                         # 세션이 종료될 때까지 대기
                         while True:
                             await asyncio.sleep(10)
-                            # spigot_build_ 세션도 찾을 수 있도록 수정됨
                             if not ScreenManager.screen_exists(session_name):
                                 print(f"[Spigot {version}] Screen 세션 종료됨")
                                 break
-
                         
                         print(f"[Spigot {version}] Screen 세션 종료 - 빌드 결과 확인 중...")
                     else:
@@ -164,20 +162,34 @@ class ServerCoreManager:
                 )
                 await process.wait()
             
-            # 빌드 결과 확인
-            spigot_jar = list(version_dir.glob(f'spigot-{version}.jar'))
-            if spigot_jar:
-                shutil.move(str(spigot_jar[0]), str(version_dir / 'server.jar'))
-                print(f"[Spigot {version}] ✅ 빌드 완료")
+            # ✅ 수정: 빌드 결과 확인 (spigot-*.jar 패턴 검색)
+            spigot_jars = list(version_dir.glob(f'spigot-*.jar'))
+            
+            if spigot_jars:
+                # 가장 최근 파일 선택
+                latest_jar = max(spigot_jars, key=lambda p: p.stat().st_mtime)
+                target_path = version_dir / 'server.jar'
+                
+                # 기존 server.jar 제거
+                if target_path.exists():
+                    target_path.unlink()
+                
+                # 이름 변경
+                shutil.move(str(latest_jar), str(target_path))
+                
+                print(f"[Spigot {version}] ✅ 빌드 완료: {latest_jar.name} -> server.jar")
                 
                 with open(build_state_file, 'w') as f:
                     json.dump({
                         'version': version,
                         'completed_at': datetime.now().isoformat(),
-                        'status': 'success'
+                        'status': 'success',
+                        'jar_file': latest_jar.name
                     }, f)
             else:
                 print(f"[Spigot {version}] ❌ 빌드 실패: jar 파일 없음")
+                print(f"   디렉토리 내용: {list(version_dir.glob('*'))}")
+                
                 with open(build_state_file, 'w') as f:
                     json.dump({
                         'version': version,
@@ -216,19 +228,24 @@ class ServerCoreManager:
         print("모든 Spigot 빌드 완료")
     
     async def update_paper(self):
-        """Paper 다운로드"""
+        """Paper 다운로드 (수정: User-Agent 추가)"""
         try:
             headers = {
-                'User-Agent': 'Mozilla/5.0 (compatible; MinecraftBot/1.0)'
+                'User-Agent': 'MinecraftBot/1.0 (Discord Server Manager)',
+                'Accept': 'application/json'
             }
-            async with aiohttp.ClientSession() as session:
-                async with session.get('https://papermc.io/api/v2/projects/paper') as resp:
+            
+            async with aiohttp.ClientSession(headers=headers) as session:
+                # ✅ PaperMC API v2 엔드포인트
+                async with session.get('https://api.papermc.io/v2/projects/paper', timeout=10) as resp:
                     if resp.status != 200:
                         print(f"Paper 실패: HTTP {resp.status}")
                         return
+                    
                     data = await resp.json()
-                    versions = data['versions']
+                    versions = data.get('versions', [])
                 
+                # 최근 5개 버전만 다운로드
                 for version in versions[-5:]:
                     version_dir = self.cores_dir / 'paper' / version
                     version_dir.mkdir(parents=True, exist_ok=True)
@@ -237,17 +254,33 @@ class ServerCoreManager:
                     if jar_file.exists():
                         continue
                     
-                    async with session.get(f'https://papermc.io/api/v2/projects/paper/versions/{version}') as resp:
+                    # 버전별 빌드 목록 조회
+                    async with session.get(f'https://api.papermc.io/v2/projects/paper/versions/{version}', timeout=10) as resp:
+                        if resp.status != 200:
+                            print(f"Paper {version} 빌드 조회 실패")
+                            continue
+                        
                         version_data = await resp.json()
-                        build = version_data['builds'][-1]
+                        builds = version_data.get('builds', [])
+                        
+                        if not builds:
+                            continue
+                        
+                        build = builds[-1]  # 최신 빌드
                     
-                    download_url = f'https://papermc.io/api/v2/projects/paper/versions/{version}/builds/{build}/downloads/paper-{version}-{build}.jar'
+                    # 다운로드 URL
+                    download_url = f'https://api.papermc.io/v2/projects/paper/versions/{version}/builds/{build}/downloads/paper-{version}-{build}.jar'
                     
-                    async with session.get(download_url) as resp:
+                    # JAR 다운로드
+                    async with session.get(download_url, timeout=60) as resp:
+                        if resp.status != 200:
+                            print(f"Paper {version} 다운로드 실패")
+                            continue
+                        
                         with open(jar_file, 'wb') as f:
                             f.write(await resp.read())
                     
-                    print(f"Paper {version} 다운로드")
+                    print(f"Paper {version} (빌드 {build}) 다운로드 완료")
         
         except Exception as e:
             print(f"Paper 실패: {e}")
@@ -364,31 +397,49 @@ class ServerCoreManager:
         await asyncio.gather(*tasks, return_exceptions=True)
     
     async def _update_worldedit(self):
-        """WorldEdit 다운로드"""
+        """WorldEdit 다운로드 (수정: 에러 핸들링 강화)"""
         try:
             plugin_dir = self.plugins_dir / 'worldedit'
             plugin_dir.mkdir(exist_ok=True)
             
-            async with aiohttp.ClientSession() as session:
-                async with session.get('https://api.github.com/repos/EngineHub/WorldEdit/releases/latest') as resp:
-                    data = await resp.json()
+            headers = {
+                'User-Agent': 'MinecraftBot/1.0',
+                'Accept': 'application/vnd.github+json'
+            }
+            
+            async with aiohttp.ClientSession(headers=headers) as session:
+                async with session.get('https://api.github.com/repos/EngineHub/WorldEdit/releases/latest', timeout=10) as resp:
+                    if resp.status != 200:
+                        print(f"WorldEdit 실패: HTTP {resp.status}")
+                        return
                     
+                    data = await resp.json()
                     assets = data.get('assets', [])
+                    
                     if not assets:
                         print(f"WorldEdit 실패: assets 목록 없음")
                         return
                     
+                    # bukkit JAR 찾기
                     for asset in assets:
-                        if 'bukkit' in asset['name'].lower() and asset['name'].endswith('.jar'):
+                        name = asset.get('name', '').lower()
+                        if 'bukkit' in name and name.endswith('.jar'):
                             download_url = asset['browser_download_url']
+                            jar_name = asset['name']
                             
-                            async with session.get(download_url) as dl_resp:
-                                jar_file = plugin_dir / asset['name']
+                            async with session.get(download_url, timeout=60) as dl_resp:
+                                if dl_resp.status != 200:
+                                    continue
+                                
+                                jar_file = plugin_dir / jar_name
                                 with open(jar_file, 'wb') as f:
                                     f.write(await dl_resp.read())
                             
-                            print(f"WorldEdit 다운로드")
-                            break
+                            print(f"WorldEdit 다운로드 완료: {jar_name}")
+                            return
+                    
+                    print(f"WorldEdit 실패: bukkit JAR 없음")
+        
         except Exception as e:
             print(f"WorldEdit 실패: {e}")
     
