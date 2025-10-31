@@ -6,7 +6,10 @@
 import discord
 from discord import app_commands
 from typing import Optional
-
+import tempfile
+import time
+from pathlib import Path
+import asyncio
 
 def setup_lifecycle_commands(bot):
     """서버 생명주기 관리 명령어 등록"""
@@ -277,8 +280,6 @@ def setup_lifecycle_commands(bot):
                 return
             
             # 임시 파일 저장 (고유 파일명)
-            import tempfile
-            import time
             temp_dir = Path(tempfile.gettempdir())
             timestamp = int(time.time() * 1000)
             temp_file = temp_dir / f"{timestamp}_{attachment.filename}"
