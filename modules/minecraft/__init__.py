@@ -10,6 +10,9 @@ from .ServerConfigurator import ServerConfigurator
 from .RconClient import RconClient
 from .ScreenManager import ScreenManager, TerminalLauncher
 from .PortManager import PortManager
+from .ServerCoreManager import ServerCoreManager
+from .ServerLifecycleManager import ServerLifecycleManager
+from .ServerLifecycleCommands import setup_lifecycle_commands
 
 __all__ = [
     'ServerManager', 
@@ -19,5 +22,8 @@ __all__ = [
     'RconClient',
     'ScreenManager',
     'TerminalLauncher',
-    'PortManager'
+    'PortManager',
+    'ServerCoreManager',
+    'ServerLifecycleManager',
+    'setup_lifecycle_commands'
 ]

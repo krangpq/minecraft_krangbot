@@ -44,7 +44,10 @@ from modules.minecraft import (
     ServerManager,
     ServerScanner,
     ServerConfigurator,
-    setup_commands as setup_mc_commands
+    ServerCoreManager,
+    ServerLifecycleManager,
+    setup_commands as setup_mc_commands,
+    setup_lifecycle_commands
 )
 
 
@@ -55,6 +58,14 @@ class MinecraftBot(commands.Bot):
         intents = discord.Intents.default()
         intents.message_content = True
         super().__init__(command_prefix='!', intents=intents)
+        
+        # 구동기 관리자 초기화
+        self.core_manager = ServerCoreManager(BASE_PATH)
+        print("구동기 관리자 초기화")
+        
+        # 서버 생명주기 관리자 초기화
+        self.lifecycle_manager = ServerLifecycleManager(SERVERS_DIR, self.core_manager)
+        print("생명주기 관리자 초기화")
         
         # 서버 설정 준비
         servers_config = self._prepare_servers()
@@ -75,10 +86,10 @@ class MinecraftBot(commands.Bot):
         self.config = None
         
         if IS_GCP_ENVIRONMENT and ENABLE_GCP_CONTROL:
-            print("\n🌍 GCP 환경 감지됨")
+            print("\nGCP 환경 감지")
             self._init_gcp_control()
         else:
-            print("\n💻 로컬 환경 - GCP 제어 기능 비활성화")
+            print("\n로컬 환경")
         
         # 자동 종료 상태 추적
         self.empty_since = {}  # {server_id: datetime}
@@ -171,15 +182,24 @@ class MinecraftBot(commands.Bot):
     
     async def setup_hook(self):
         """봇 시작 시 슬래시 명령어 등록 및 동기화"""
+        # 구동기 자동 업데이트
+        print("\n구동기 업데이트 시작...")
+        await self.core_manager.update_all_cores()
+        print("구동기 업데이트 완료\n")
+        
         setup_mc_commands(self)
+        setup_lifecycle_commands(self)
         
         await self.tree.sync()
-        print("✅ 슬래시 명령어 동기화 완료!")
+        print("슬래시 명령어 동기화 완료")
+        
+        # 백업 정리
+        await self.lifecycle_manager.cleanup_old_backups()
         
         # 자동 종료 모니터링 시작
         if ENABLE_AUTO_SHUTDOWN:
             self.check_empty_servers.start()
-            print(f"✅ 자동 종료 모니터링 시작 (대기 시간: {EMPTY_SERVER_TIMEOUT}분)")
+            print(f"자동 종료 모니터링 시작 (대기: {EMPTY_SERVER_TIMEOUT}분)")
     
     @tasks.loop(minutes=1)
     async def check_empty_servers(self):
@@ -316,11 +336,16 @@ class MinecraftBot(commands.Bot):
                             all_stopped = False
                             break
                     
+                    # Spigot 빌드 중인지 확인 (안전장치)
+                    if self.core_manager.building_spigot:
+                        print(f"⚠️ Spigot 빌드 진행 중 - 인스턴스 유지")
+                        all_stopped = False
+                    
                     if all_stopped:
                         print(f"☁️ 모든 서버가 중지되어 GCP 인스턴스를 중지합니다...")
                         await self.stop_gcp_instance()
                     else:
-                        print(f"ℹ️ 다른 서버가 실행 중이므로 인스턴스는 유지합니다")
+                        print(f"ℹ️ 다른 서버가 실행 중이거나 빌드 진행 중 - 인스턴스 유지")
             else:
                 print(f"❌ [{server_id}] 서버 중지 실패: {message}")
             
@@ -367,6 +392,12 @@ class MinecraftBot(commands.Bot):
         try:
             if not self.gcp_controller:
                 print(f"⚠️ GCP 컨트롤러가 초기화되지 않았습니다")
+                return
+            
+            # Spigot 빌드 중인지 확인 (안전장치)
+            if self.core_manager.building_spigot:
+                print(f"⚠️ Spigot 빌드 진행 중 - 인스턴스 종료 취소")
+                print(f"   빌드 중인 버전: {list(self.core_manager.building_spigot.keys())}")
                 return
             
             instance_name = self.config.get('gcp_instance_name', GCP_INSTANCE_NAME)
@@ -435,6 +466,7 @@ class MinecraftBot(commands.Bot):
         print("\n" + "="*60)
         print("🚀 봇이 준비되었습니다!")
         print("💡 Discord에서 /서버목록 을 입력하여 서버를 확인하세요")
+        print("💡 /서버생성 으로 새 서버를 만들 수 있습니다!")
         print("="*60 + "\n")
     
     async def on_error(self, event, *args, **kwargs):
@@ -446,6 +478,11 @@ class MinecraftBot(commands.Bot):
     async def close(self):
         """봇 종료"""
         print("\n👋 봇을 종료합니다...")
+        
+        # Spigot 빌드 완료 대기 (안전장치)
+        if self.core_manager.building_spigot:
+            print("\n⚠️ Spigot 빌드 진행 중 - 완료 대기")
+            await self.core_manager.wait_for_builds_completion()
         
         # 자동 종료 모니터링 중지
         if hasattr(self, 'check_empty_servers') and self.check_empty_servers.is_running():

@@ -10,5 +10,6 @@ mcrcon>=0.7.0
 # 시스템 모니터링
 psutil>=5.9.0
 
-# HTTP 요청 (GCP 메타데이터)
+# HTTP 요청 (GCP 메타데이터, 서버 jar 다운로드)
 requests>=2.31.0
+aiohttp>=3.9.0
