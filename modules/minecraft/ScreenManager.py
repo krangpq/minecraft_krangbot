@@ -1,6 +1,6 @@
 """
 Screen 세션을 사용한 마인크래프트 서버 관리
-Linux 전용 - SSH 환경에 최적화 (디버깅 강화)
+Linux 전용 - SSH 환경에 최적화
 """
 
 import subprocess
@@ -25,7 +25,7 @@ class ScreenManager:
     @staticmethod
     def list_screens(filter_prefix: str = None) -> List[str]:
         """
-        실행 중인 모든 screen 세션 목록 (개선된 파싱)
+        실행 중인 모든 screen 세션 목록
         
         Args:
             filter_prefix: 세션 이름 필터 (예: "minecraft_")
@@ -37,13 +37,7 @@ class ScreenManager:
                 text=True
             )
             
-            # 디버깅: 원본 출력 확인
-            print(f"      [DEBUG] screen -ls 원본 출력:")
-            for line in result.stdout.split('\n'):
-                if line.strip():
-                    print(f"      [DEBUG]   '{line}'")
-            
-            # 출력 파싱 (개선된 버전)
+            # 출력 파싱
             lines = result.stdout.split('\n')
             screens = []
             
@@ -63,30 +57,21 @@ class ScreenManager:
                 
                 # 세션 라인 감지: "PID.name (상태)" 형식
                 if '.' in line and '(' in line:
-                    # 공백이나 탭으로 시작하는 세션 라인
-                    # 예: "    12345.minecraft_testserver   (Detached)"
                     parts = line.split()
                     if parts:
-                        # 첫 번째 단어가 PID.name 형식
                         session_id = parts[0]
-                        # PID가 숫자로 시작하는지 확인
                         if '.' in session_id:
                             pid_part = session_id.split('.')[0]
                             name_part = session_id.split('.', 1)[1]
                             
                             if pid_part.isdigit():
-                                # ✅ 필터링: minecraft_로 시작하는 세션만
+                                # 필터링
                                 if filter_prefix:
                                     if name_part.startswith(filter_prefix):
                                         screens.append(session_id)
-                                        print(f"      [DEBUG] 파싱된 세션 (필터 통과): {session_id}")
-                                    else:
-                                        print(f"      [DEBUG] 세션 제외 (필터 불일치): {session_id} (이름: {name_part})")
                                 else:
                                     screens.append(session_id)
-                                    print(f"      [DEBUG] 파싱된 세션: {session_id}")
             
-            print(f"      [DEBUG] 최종 세션 목록: {screens}")
             return screens
             
         except Exception as e:
@@ -294,7 +279,7 @@ class ScreenManager:
     @staticmethod
     def find_screen_by_name(session_name: str) -> Optional[str]:
         """
-        Screen 세션을 이름으로 찾기 (PID.name 형식 처리) - 디버깅 강화
+        Screen 세션을 이름으로 찾기 (PID.name 형식 처리)
         
         Args:
             session_name: 찾을 세션 이름 (예: "minecraft_testserver")
@@ -304,10 +289,6 @@ class ScreenManager:
         """
         # ✅ minecraft_로 시작하는 세션만 검색
         screens = ScreenManager.list_screens(filter_prefix="minecraft_")
-        
-        # 디버깅: 검색 과정 출력
-        # print(f"      [find_screen_by_name] 찾는 이름: '{session_name}'")
-        # print(f"      [find_screen_by_name] 모든 세션: {screens}")
         
         for screen in screens:
             # "12345.minecraft_main" 형식에서 이름 부분만 추출
@@ -319,19 +300,14 @@ class ScreenManager:
                     pid_part = parts[0]
                     name_part = parts[1]
                     
-                    # print(f"      [find_screen_by_name] 파싱: '{screen}' → PID={pid_part}, 이름={name_part}")
-                    
                     # PID가 숫자인지 확인
                     if pid_part.isdigit() and name_part == session_name:
-                        # print(f"      [find_screen_by_name] ✅ 매칭: {screen}")
                         return screen
             
             # 점이 없는 경우 (드물지만 가능)
             if screen == session_name:
-                # print(f"      [find_screen_by_name] ✅ 직접 매칭: {screen}")
                 return screen
         
-        # print(f"      [find_screen_by_name] ❌ 세션을 찾을 수 없음")
         return None
 
 

@@ -74,7 +74,7 @@ class ServerCoreManager:
             print(f"  Spigot {version} 빌드 대기열 추가")
     
     async def _build_spigot_background(self, version: str):
-        """Spigot 백그라운드 빌드"""
+        """Spigot Screen 세션 빌드"""
         try:
             print(f"\n[Spigot {version}] 빌드 시작")
             
@@ -92,7 +92,7 @@ class ServerCoreManager:
             
             print(f"[Spigot {version}] BuildTools 다운로드 완료")
             
-            # 빌드 상태 파일 (안전장치)
+            # 빌드 상태 파일
             build_state_file = version_dir / '.building'
             with open(build_state_file, 'w') as f:
                 json.dump({
@@ -101,35 +101,90 @@ class ServerCoreManager:
                     'status': 'building'
                 }, f)
             
-            # BuildTools 실행
-            process = await asyncio.create_subprocess_exec(
-                'java', '-jar', str(buildtools_path), '--rev', version,
-                cwd=str(version_dir),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            
-            await process.wait()
-            
-            if process.returncode == 0:
-                spigot_jar = list(version_dir.glob(f'spigot-{version}.jar'))
-                if spigot_jar:
-                    shutil.move(str(spigot_jar[0]), str(version_dir / 'server.jar'))
-                    print(f"[Spigot {version}] 빌드 완료")
+            # Screen 세션으로 BuildTools 실행
+            import platform
+            if platform.system() == "Linux":
+                try:
+                    from modules.minecraft.ScreenManager import ScreenManager
                     
-                    with open(build_state_file, 'w') as f:
-                        json.dump({
-                            'version': version,
-                            'completed_at': datetime.now().isoformat(),
-                            'status': 'success'
-                        }, f)
-                else:
-                    print(f"[Spigot {version}] 빌드 실패: jar 파일 없음")
+                    session_name = f"spigot_build_{version.replace('.', '_')}"
+                    build_command = f"java -jar {buildtools_path} --rev {version}"
+                    
+                    # 기존 세션 확인 및 종료
+                    if ScreenManager.screen_exists(session_name):
+                        print(f"[Spigot {version}] 기존 빌드 세션 종료 중...")
+                        await ScreenManager().kill_screen(session_name)
+                        await asyncio.sleep(2)
+                    
+                    # Screen 세션 생성
+                    print(f"[Spigot {version}] Screen 세션 생성: {session_name}")
+                    success, message, actual_session = await ScreenManager().create_screen(
+                        session_name=session_name,
+                        command=build_command,
+                        cwd=str(version_dir),
+                        reuse_existing=True
+                    )
+                    
+                    if success and actual_session:
+                        print(f"[Spigot {version}] 빌드 진행 중 - Screen 세션: {actual_session}")
+                        print(f"💡 빌드 과정을 보려면: screen -r {actual_session}")
+                        
+                        # 세션이 종료될 때까지 대기
+                        while ScreenManager.screen_exists(session_name):
+                            await asyncio.sleep(10)
+                        
+                        print(f"[Spigot {version}] Screen 세션 종료 - 빌드 결과 확인 중...")
+                    else:
+                        print(f"[Spigot {version}] Screen 생성 실패, 백그라운드로 빌드")
+                        raise ImportError  # 폴백
+                    
+                except ImportError:
+                    # Screen 사용 불가 시 백그라운드 빌드
+                    print(f"[Spigot {version}] 백그라운드 빌드")
+                    process = await asyncio.create_subprocess_exec(
+                        'java', '-jar', str(buildtools_path), '--rev', version,
+                        cwd=str(version_dir),
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE
+                    )
+                    await process.wait()
             else:
-                print(f"[Spigot {version}] 빌드 실패")
+                # Windows/macOS - 백그라운드 빌드
+                print(f"[Spigot {version}] 백그라운드 빌드 (비 Linux 환경)")
+                process = await asyncio.create_subprocess_exec(
+                    'java', '-jar', str(buildtools_path), '--rev', version,
+                    cwd=str(version_dir),
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
+                await process.wait()
+            
+            # 빌드 결과 확인
+            spigot_jar = list(version_dir.glob(f'spigot-{version}.jar'))
+            if spigot_jar:
+                shutil.move(str(spigot_jar[0]), str(version_dir / 'server.jar'))
+                print(f"[Spigot {version}] ✅ 빌드 완료")
+                
+                with open(build_state_file, 'w') as f:
+                    json.dump({
+                        'version': version,
+                        'completed_at': datetime.now().isoformat(),
+                        'status': 'success'
+                    }, f)
+            else:
+                print(f"[Spigot {version}] ❌ 빌드 실패: jar 파일 없음")
+                with open(build_state_file, 'w') as f:
+                    json.dump({
+                        'version': version,
+                        'completed_at': datetime.now().isoformat(),
+                        'status': 'failed',
+                        'error': 'jar not found'
+                    }, f)
             
         except Exception as e:
-            print(f"[Spigot {version}] 빌드 오류: {e}")
+            print(f"[Spigot {version}] ❌ 빌드 오류: {e}")
+            import traceback
+            traceback.print_exc()
         finally:
             if version in self.building_spigot:
                 del self.building_spigot[version]
