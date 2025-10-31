@@ -67,6 +67,9 @@ class MinecraftBot(commands.Bot):
             default_server=self._get_default_server(servers_config)
         )
         
+        # 전체 유휴 상태 추적 추가
+        self.all_servers_idle_since = None  # 모든 서버가 꺼진 시간
+
         # GCP 제어 기능 초기화 (GCP 환경에서만)
         self.gcp_controller = None
         self.config = None
@@ -180,8 +183,49 @@ class MinecraftBot(commands.Bot):
     
     @tasks.loop(minutes=1)
     async def check_empty_servers(self):
-        """서버 비어있는지 주기적으로 확인"""
+        """서버 비어있는지 주기적으로 확인 (타임아웃 처리 개선)"""
         try:
+             # 실행 중인 서버가 하나라도 있는지 확인
+            any_server_running = False
+            for server_id in self.mc.get_all_server_ids():
+                if self.mc.is_server_running(server_id):
+                    any_server_running = True
+                    break
+            
+            # 모든 서버가 꺼져있는 경우
+            if not any_server_running:
+                if self.all_servers_idle_since is None:
+                    # 처음 모든 서버가 꺼짐
+                    self.all_servers_idle_since = datetime.now()
+                    print(f"⏰ 모든 마인크래프트 서버가 비활성 상태입니다. {EMPTY_SERVER_TIMEOUT}분 후 GCP 인스턴스 자동 종료 예정")
+                else:
+                    # 비활성 시간 계산
+                    idle_minutes = (datetime.now() - self.all_servers_idle_since).total_seconds() / 60
+                    
+                    # 경고 (5분 전)
+                    if idle_minutes >= (EMPTY_SERVER_TIMEOUT - AUTO_SHUTDOWN_WARNING_TIME) and idle_minutes < EMPTY_SERVER_TIMEOUT:
+                        remaining = EMPTY_SERVER_TIMEOUT - idle_minutes
+                        if int(remaining) == AUTO_SHUTDOWN_WARNING_TIME:  # 정확히 5분 남았을 때만
+                            print(f"⚠️ {AUTO_SHUTDOWN_WARNING_TIME}분 후 컨트롤러 봇에게 GCP 인스턴스 종료 요청합니다")
+                    
+                    # 시간 초과 시 컨트롤러 봇에게 요청
+                    if idle_minutes >= EMPTY_SERVER_TIMEOUT:
+                        print(f"🛑 {EMPTY_SERVER_TIMEOUT}분간 모든 서버가 비활성 상태")
+                        print(f"   📡 컨트롤러 봇에게 GCP 인스턴스 종료 요청 중...")
+                        
+                        # GCP 제어 기능이 활성화되어 있을 때만 요청
+                        if AUTO_STOP_INSTANCE and self.gcp_controller:
+                            await self.shutdown_gcp_instance_when_all_idle()
+                        else:
+                            print(f"   ℹ️ GCP 자동 중지 기능이 비활성화되어 있습니다")
+                        
+                        self.all_servers_idle_since = None  # 초기화
+                        return
+            else:
+                # 서버가 하나라도 실행 중이면 초기화
+                if self.all_servers_idle_since is not None:
+                    print(f"✅ 서버 활성화로 전체 유휴 타이머 취소")
+                    self.all_servers_idle_since = None
             for server_id in self.mc.get_all_server_ids():
                 # 서버 실행 중인지 확인
                 if not self.mc.is_server_running(server_id):
@@ -192,10 +236,21 @@ class MinecraftBot(commands.Bot):
                         del self.shutdown_notified[server_id]
                     continue
                 
-                # 서버 상태 조회
-                status = await self.mc.get_server_status(server_id)
+                # 서버 상태 조회 (타임아웃 처리)
+                try:
+                    status = await asyncio.wait_for(
+                        self.mc.get_server_status(server_id),
+                        timeout=15.0
+                    )
+                except asyncio.TimeoutError:
+                    print(f"⚠️ [{server_id}] 서버 상태 확인 타임아웃 - 이번 체크는 건너뜀")
+                    continue
+                except Exception as e:
+                    print(f"⚠️ [{server_id}] 상태 확인 오류: {e}")
+                    continue
                 
                 if not status or not status.get('online'):
+                    # 상태 조회 실패 시에는 카운터 유지 (변경 없음)
                     continue
                 
                 players = status.get('players', {})
@@ -232,6 +287,8 @@ class MinecraftBot(commands.Bot):
         
         except Exception as e:
             print(f"⚠️ 자동 종료 체크 오류: {e}")
+            import traceback
+            traceback.print_exc()
     
     async def auto_shutdown_server(self, server_id: str):
         """서버 자동 종료 및 인스턴스 중지"""
@@ -301,6 +358,38 @@ class MinecraftBot(commands.Bot):
         
         except Exception as e:
             print(f"❌ GCP 인스턴스 중지 오류: {e}")
+    async def shutdown_gcp_instance_when_all_idle(self):
+        """
+        모든 서버 유휴 시 GCP 인스턴스 종료 요청
+        
+        주의: 직접 종료하지 않고 컨트롤러 봇에게 요청합니다!
+        """
+        try:
+            if not self.gcp_controller:
+                print(f"⚠️ GCP 컨트롤러가 초기화되지 않았습니다")
+                return
+            
+            instance_name = self.config.get('gcp_instance_name', GCP_INSTANCE_NAME)
+            
+            print(f"⏳ GCP 인스턴스 중지 요청: {instance_name}")
+            print(f"   📡 컨트롤러 봇에게 요청 전송 중...")
+            
+            # ✅ 컨트롤러 봇에게 중지 요청 (직접 종료 아님!)
+            success, response = await self.gcp_controller.send_shutdown_request(
+                instance=instance_name,
+                reason="전체 유휴 - 모든 서버 비활성"
+            )
+            
+            if success:
+                print(f"✅ 컨트롤러 봇이 GCP 인스턴스 중지 요청 수락")
+                print(f"💰 컴퓨팅 비용 절감 시작!")
+            else:
+                print(f"❌ 컨트롤러 봇이 GCP 인스턴스 중지 거부: {response}")
+                print(f"💡 VPN 서버에서 수동으로 `/인스턴스중지` 명령어를 사용하세요")
+        
+        except Exception as e:
+            print(f"❌ GCP 인스턴스 중지 요청 오류: {e}")
+
     
     async def on_ready(self):
         """봇 준비 완료"""

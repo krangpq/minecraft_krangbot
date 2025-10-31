@@ -26,7 +26,7 @@ class PortManager:
     @staticmethod
     def is_port_open(port: int, host: str = '0.0.0.0') -> bool:
         """
-        포트가 사용 가능한지 확인
+        포트가 사용 가능한지 확인 (개선된 버전)
         
         Args:
             port: 확인할 포트 번호
@@ -37,27 +37,20 @@ class PortManager:
             False: 포트 사용 중 (닫힘)
         """
         try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(1)
-            result = sock.connect_ex((host, port))
-            sock.close()
+            # bind()로 직접 확인 (가장 정확한 방법)
+            test_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            test_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            test_sock.settimeout(1)
             
-            # connect_ex returns 0 if port is open (in use)
-            # We want to return True if port is available (not in use)
-            if result == 0:
-                # Port is open (something is listening)
+            try:
+                test_sock.bind((host, port))
+                test_sock.close()
+                return True
+            except OSError as e:
+                # Address already in use
+                test_sock.close()
                 return False
-            else:
-                # Port is closed (nothing listening)
-                # But we need to check if we can bind to it
-                try:
-                    test_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    test_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                    test_sock.bind((host, port))
-                    test_sock.close()
-                    return True
-                except OSError:
-                    return False
+                
         except Exception as e:
             print(f"⚠️ 포트 {port} 확인 오류: {e}")
             return False

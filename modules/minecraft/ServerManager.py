@@ -44,6 +44,9 @@ class ServerManager:
         
         # RCON 클라이언트
         self.rcon_clients = {}
+
+        # 동시 실행 방지용 Lock
+        self.server_locks = {}  # {server_id: asyncio.Lock}
         
         # 서버 상태 캐시
         self.server_status = {}
@@ -199,80 +202,91 @@ class ServerManager:
         return server_id in self.rcon_clients
     
     async def start_server(self, server_id: str) -> Tuple[bool, str]:
-        """서버 시작 (디버깅 강화)"""
+        """서버 시작 (Lock으로 동시 실행 방지)"""
         try:
-            # ✅ 1단계: 프로세스/Screen 세션 체크 (빠름)
-            if self.is_process_running(server_id):
+            # Lock 생성 (없으면)
+            if server_id not in self.server_locks:
+                self.server_locks[server_id] = asyncio.Lock()
+            
+            # Lock 획득 (다른 요청이 이미 실행 중이면 대기)
+            async with self.server_locks[server_id]:
+                # ✅ 1단계: 프로세스/Screen 세션 체크 (빠름)
+                if self.is_process_running(server_id):
+                    config = self.get_server_config(server_id)
+                    return False, f"⚠️ {config['name']} 서버가 이미 실행 중입니다.\n💡 서버 시작 중이라면 잠시 기다려주세요."
+                
+                # ✅ 2단계: 포트까지 열렸는지 확인 (느림)
+                if self.is_server_running(server_id):
+                    return False, "서버가 이미 실행 중입니다."
+                    
                 config = self.get_server_config(server_id)
-                return False, f"⚠️ {config['name']} 서버가 이미 실행 중입니다.\n💡 서버 시작 중이라면 잠시 기다려주세요."
-            
-            # ✅ 2단계: 포트까지 열렸는지 확인 (느림)
-            if self.is_server_running(server_id):
-                return False, "서버가 이미 실행 중입니다."
+                if not config:
+                    return False, f"서버 설정을 찾을 수 없습니다: {server_id}"
                 
-            config = self.get_server_config(server_id)
-            if not config:
-                return False, f"서버 설정을 찾을 수 없습니다: {server_id}"
-            
-            server_path = Path(config['path'])
-            if not server_path.exists():
-                return False, f"서버 경로가 존재하지 않습니다: {server_path}"
-            
-            start_command = config['start_command']
-            terminal_mode = config.get('terminal_mode', 'auto')
-            
-            print(f"🚀 서버 시작: {config['name']}")
-            print(f"   경로: {server_path}")
-            print(f"   명령어: {start_command}")
-            print(f"   모드: {terminal_mode}")
-            
-            # 터미널 런처 사용 가능한 경우
-            if self.terminal_launcher:
-                # terminal_mode 결정
-                if terminal_mode == "auto":
-                    use_screen = (self.os_type == "Linux")
-                elif terminal_mode == "screen":
-                    use_screen = True
-                elif terminal_mode == "separate":
-                    use_screen = True
-                else:  # "background"
-                    use_screen = False
+                server_path = Path(config['path'])
+                if not server_path.exists():
+                    return False, f"서버 경로가 존재하지 않습니다: {server_path}"
                 
-                success, message, screen_session = await self.terminal_launcher.launch_server(
-                    server_id=server_id,
-                    command=start_command,
-                    cwd=str(server_path),
-                    use_screen=use_screen
-                )
+                # 메모리 체크 추가
+                memory_check_result = self._check_system_memory(config)
+                if not memory_check_result[0]:
+                    return False, memory_check_result[1]
                 
-                print(f"   🔍 launch_server 결과:")
-                print(f"      성공: {success}")
-                print(f"      메시지: {message}")
-                print(f"      세션: {screen_session}")
+                start_command = config['start_command']
+                terminal_mode = config.get('terminal_mode', 'auto')
                 
-                if success and screen_session:
-                    # ✅ running_servers에 등록
-                    self.running_servers[server_id] = screen_session
-                    self.server_screen_sessions[server_id] = screen_session
+                print(f"🚀 서버 시작: {config['name']}")
+                print(f"   경로: {server_path}")
+                print(f"   명령어: {start_command}")
+                print(f"   모드: {terminal_mode}")
+                
+                # 터미널 런처 사용 가능한 경우
+                if self.terminal_launcher:
+                    # terminal_mode 결정
+                    if terminal_mode == "auto":
+                        use_screen = (self.os_type == "Linux")
+                    elif terminal_mode == "screen":
+                        use_screen = True
+                    elif terminal_mode == "separate":
+                        use_screen = True
+                    else:  # "background"
+                        use_screen = False
                     
-                    print(f"   ✅ running_servers에 등록: {server_id} → {screen_session}")
-                    print(f"   📋 현재 등록된 서버: {list(self.running_servers.keys())}")
+                    success, message, screen_session = await self.terminal_launcher.launch_server(
+                        server_id=server_id,
+                        command=start_command,
+                        cwd=str(server_path),
+                        use_screen=use_screen
+                    )
                     
-                    # 서버 시작 대기
-                    await asyncio.sleep(3)
+                    print(f"   🔍 launch_server 결과:")
+                    print(f"      성공: {success}")
+                    print(f"      메시지: {message}")
+                    print(f"      세션: {screen_session}")
                     
-                    return True, message
-                elif success:
-                    # Screen 없이 시작된 경우
-                    await asyncio.sleep(3)
-                    return True, message
+                    if success and screen_session:
+                        # ✅ running_servers에 등록
+                        self.running_servers[server_id] = screen_session
+                        self.server_screen_sessions[server_id] = screen_session
+                        
+                        print(f"   ✅ running_servers에 등록: {server_id} → {screen_session}")
+                        print(f"   📋 현재 등록된 서버: {list(self.running_servers.keys())}")
+                        
+                        # 서버 시작 대기
+                        await asyncio.sleep(3)
+                        
+                        return True, message
+                    elif success:
+                        # Screen 없이 시작된 경우
+                        await asyncio.sleep(3)
+                        return True, message
+                    else:
+                        return False, message
+                
+                # 폴백: 기본 백그라운드 실행
                 else:
-                    return False, message
-            
-            # 폴백: 기본 백그라운드 실행
-            else:
-                return await self._start_background(server_id, start_command, server_path)
-                
+                    return await self._start_background(server_id, start_command, server_path)
+                    
         except Exception as e:
             print(f"❌ 서버 시작 오류: {e}")
             import traceback
@@ -306,90 +320,97 @@ class ServerManager:
             return False, f"백그라운드 시작 오류: {e}"
     
     async def stop_server(self, server_id: str, force: bool = False) -> Tuple[bool, str]:
-        """서버 중지 (디버깅 강화)"""
+        """서버 중지 (Lock으로 동시 실행 방지)"""
         try:
-            print(f"\n🛑 서버 중지 시도: {server_id}")
-            print(f"   running_servers: {list(self.running_servers.keys())}")
-            print(f"   is_process_running: {self.is_process_running(server_id)}")
-            print(f"   is_server_running: {self.is_server_running(server_id)}")
+            # Lock 생성 (없으면)
+            if server_id not in self.server_locks:
+                self.server_locks[server_id] = asyncio.Lock()
             
-            if not self.is_process_running(server_id):
-                return False, "서버가 실행 중이 아닙니다."
-            
-            config = self.get_server_config(server_id)
-            obj = self.running_servers[server_id]
-            
-            print(f"   config: {config['name']}")
-            print(f"   obj 타입: {type(obj)}")
-            
-            # Screen 세션인 경우
-            if isinstance(obj, str) and SCREEN_AVAILABLE:
-                screen_session = obj
+            # Lock 획득
+            async with self.server_locks[server_id]:
+                print(f"\n🛑 서버 중지 시도: {server_id}")
+                print(f"   running_servers: {list(self.running_servers.keys())}")
+                print(f"   is_process_running: {self.is_process_running(server_id)}")
+                print(f"   is_server_running: {self.is_server_running(server_id)}")
                 
-                print(f"   Screen 세션으로 중지 시도: {screen_session}")
+                if not self.is_process_running(server_id):
+                    return False, "서버가 실행 중이 아닙니다."
                 
-                if force:
-                    success, message = await ScreenManager().kill_screen(screen_session)
-                else:
-                    # 정상 종료
-                    success, message = await ScreenManager().send_to_screen(
-                        screen_session,
-                        config.get('stop_command', 'stop')
-                    )
+                config = self.get_server_config(server_id)
+                obj = self.running_servers[server_id]
+                
+                print(f"   config: {config['name']}")
+                print(f"   obj 타입: {type(obj)}")
+                
+                # Screen 세션인 경우
+                if isinstance(obj, str) and SCREEN_AVAILABLE:
+                    screen_session = obj
                     
-                    if success:
-                        # 종료 대기
-                        for i in range(60):
-                            await asyncio.sleep(1)
-                            if not ScreenManager.screen_exists(screen_session):
-                                break
-                            if i % 10 == 0:
-                                print(f"   ⏳ 종료 대기 중... ({i}/60초)")
+                    print(f"   Screen 세션으로 중지 시도: {screen_session}")
+                    
+                    if force:
+                        success, message = await ScreenManager().kill_screen(screen_session)
+                    else:
+                        # 정상 종료
+                        success, message = await ScreenManager().send_to_screen(
+                            screen_session,
+                            config.get('stop_command', 'stop')
+                        )
                         
-                        # 타임아웃 시 강제 종료
-                        if ScreenManager.screen_exists(screen_session):
-                            await ScreenManager().kill_screen(screen_session)
-                            message += " (타임아웃으로 강제 종료)"
+                        if success:
+                            # 종료 대기 (최대 60초)
+                            for i in range(60):
+                                await asyncio.sleep(1)
+                                if not ScreenManager.screen_exists(screen_session):
+                                    break
+                                if i % 10 == 0:
+                                    print(f"   ⏳ 종료 대기 중... ({i}/60초)")
+                            
+                            # 타임아웃 시 강제 종료
+                            if ScreenManager.screen_exists(screen_session):
+                                print(f"   ⏱️ 타임아웃 - 강제 종료")
+                                await ScreenManager().kill_screen(screen_session)
+                                message += " (타임아웃으로 강제 종료)"
+                    
+                    del self.running_servers[server_id]
+                    if server_id in self.server_screen_sessions:
+                        del self.server_screen_sessions[server_id]
+                    
+                    print(f"   ✅ running_servers에서 제거됨")
+                    
+                    return True, message
                 
-                del self.running_servers[server_id]
-                if server_id in self.server_screen_sessions:
-                    del self.server_screen_sessions[server_id]
-                
-                print(f"   ✅ running_servers에서 제거됨")
-                
-                return True, message
-            
-            # Popen 프로세스인 경우
-            elif isinstance(obj, subprocess.Popen):
-                process = obj
-                
-                if force:
-                    process.terminate()
-                    await asyncio.sleep(2)
-                    if process.poll() is None:
-                        process.kill()
-                else:
-                    try:
-                        stop_cmd = config.get('stop_command', 'stop')
-                        process.stdin.write(f"{stop_cmd}\n".encode())
-                        process.stdin.flush()
-                        
-                        for _ in range(60):
-                            await asyncio.sleep(1)
-                            if process.poll() is not None:
-                                break
-                        
-                        if process.poll() is None:
-                            process.terminate()
-                            await asyncio.sleep(2)
-                            if process.poll() is None:
-                                process.kill()
-                    except:
+                # Popen 프로세스인 경우
+                elif isinstance(obj, subprocess.Popen):
+                    process = obj
+                    
+                    if force:
                         process.terminate()
-                
-                del self.running_servers[server_id]
-                return True, f"{config['name']} 서버가 중지되었습니다."
-                
+                        await asyncio.sleep(2)
+                        if process.poll() is None:
+                            process.kill()
+                    else:
+                        try:
+                            stop_cmd = config.get('stop_command', 'stop')
+                            process.stdin.write(f"{stop_cmd}\n".encode())
+                            process.stdin.flush()
+                            
+                            for _ in range(60):
+                                await asyncio.sleep(1)
+                                if process.poll() is not None:
+                                    break
+                            
+                            if process.poll() is None:
+                                process.terminate()
+                                await asyncio.sleep(2)
+                                if process.poll() is None:
+                                    process.kill()
+                        except:
+                            process.terminate()
+                    
+                    del self.running_servers[server_id]
+                    return True, f"{config['name']} 서버가 중지되었습니다."
+                    
         except Exception as e:
             print(f"❌ 서버 중지 오류: {e}")
             import traceback
@@ -467,26 +488,35 @@ class ServerManager:
         }
     
     async def get_server_status(self, server_id: str) -> Optional[dict]:
-        """서버 상태 조회"""
+        """서버 상태 조회 (타임아웃 추가)"""
         try:
             config = self.get_server_config(server_id)
             if not config:
                 return None
             
+            # 타임아웃 설정 (10초)
             server = JavaServer.lookup(f"localhost:{config['port']}")
-            status = await asyncio.to_thread(server.status)
             
-            return {
-                "online": True,
-                "players": {
-                    "online": status.players.online,
-                    "max": status.players.max,
-                    "names": [p.name for p in (status.players.sample or [])]
-                },
-                "version": status.version.name,
-                "latency": status.latency
-            }
-            
+            try:
+                status = await asyncio.wait_for(
+                    asyncio.to_thread(server.status),
+                    timeout=10.0
+                )
+                
+                return {
+                    "online": True,
+                    "players": {
+                        "online": status.players.online,
+                        "max": status.players.max,
+                        "names": [p.name for p in (status.players.sample or [])]
+                    },
+                    "version": status.version.name,
+                    "latency": status.latency
+                }
+            except asyncio.TimeoutError:
+                print(f"⚠️ [{server_id}] 서버 상태 조회 타임아웃")
+                return {"online": False, "error": "timeout"}
+                
         except Exception as e:
             return {"online": False, "error": str(e)}
     
@@ -573,3 +603,40 @@ class ServerManager:
             await self.stop_server(server_id, force=False)
         
         print("✅ 서버 정리 완료")
+    
+    def _check_system_memory(self, config: dict) -> Tuple[bool, str]:
+        """
+        시스템 메모리가 충분한지 확인
+        
+        Returns:
+            (충분한지, 메시지)
+        """
+        try:
+            import psutil
+            
+            memory_config = config.get('memory', {})
+            required_mb = memory_config.get('max', 4096)
+            
+            # 시스템 가용 메모리 확인
+            mem = psutil.virtual_memory()
+            available_mb = mem.available / (1024 * 1024)
+            
+            # 필요한 메모리 + 1GB 여유분
+            required_with_buffer = required_mb + 1024
+            
+            if available_mb < required_with_buffer:
+                return False, (
+                    f"❌ 시스템 메모리 부족!\n"
+                    f"필요: {required_with_buffer:.0f}MB\n"
+                    f"사용 가능: {available_mb:.0f}MB\n"
+                    f"💡 다른 프로그램을 종료하거나 서버 메모리 설정을 낮춰주세요."
+                )
+            
+            return True, "OK"
+            
+        except ImportError:
+            # psutil 없으면 체크 건너뛰기
+            return True, "OK"
+        except Exception as e:
+            print(f"⚠️ 메모리 체크 오류: {e}")
+            return True, "OK"  # 오류 시에는 통과

@@ -111,8 +111,11 @@ class ServerConfigurator:
             print(f"❌ 봇 설정 저장 실패: {e}")
     
     def generate_rcon_password(self, length: int = 16) -> str:
-        """안전한 RCON 비밀번호 생성"""
-        alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*"
+        """
+        안전한 RCON 비밀번호 생성 (개선된 버전)
+        일부 마인크래프트 버전에서 특수문자 처리 문제가 있어 알파벳+숫자만 사용
+        """
+        alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
         password = ''.join(secrets.choice(alphabet) for _ in range(length))
         return password
     

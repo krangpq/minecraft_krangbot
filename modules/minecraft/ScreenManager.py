@@ -103,7 +103,7 @@ class ScreenManager:
     @staticmethod
     async def create_screen(session_name: str, command: str, cwd: str, reuse_existing: bool = True) -> Tuple[bool, str, Optional[str]]:
         """
-        새 screen 세션 생성 및 명령어 실행 (디버깅 강화)
+        새 screen 세션 생성 및 명령어 실행 (개선된 버전)
         
         Args:
             session_name: screen 세션 이름
@@ -125,11 +125,22 @@ class ScreenManager:
             if existing_session:
                 if reuse_existing:
                     print(f"   ⚠️ 기존 Screen 세션 발견: {existing_session}")
-                    print(f"      새 명령어로 재시작합니다...")
-                    # 기존 세션 종료
+                    print(f"      기존 세션을 종료하고 새로 시작합니다...")
+                    
+                    # 기존 세션 강제 종료
                     await ScreenManager.kill_screen(existing_session)
+                    
+                    # 종료 확인 (최대 5초 대기)
+                    for i in range(10):
+                        await asyncio.sleep(0.5)
+                        if not ScreenManager.screen_exists(session_name):
+                            print(f"      ✅ 기존 세션 종료 완료")
+                            break
+                        if i == 9:
+                            print(f"      ⚠️ 기존 세션 종료 확인 실패, 계속 진행...")
+                    
+                    # 추가 대기 (안전성)
                     await asyncio.sleep(1)
-                    # 아래 세션 생성 로직으로 계속 진행  
                 else:
                     return False, f"Screen 세션이 이미 존재합니다: {existing_session}", None
             
@@ -163,20 +174,20 @@ class ScreenManager:
             if stderr:
                 print(f"      stderr: {stderr.decode()}")
             
-            # ✅ 세션 생성 확인 (최대 5초 대기, 0.5초 간격으로 10번 확인)
+            # ✅ 세션 생성 확인 (최대 10초 대기, 0.5초 간격으로 20번 확인)
             print(f"      ⏳ Screen 세션 등록 확인 중...")
             actual_session = None
             
-            for i in range(10):
+            for i in range(20):
                 await asyncio.sleep(0.5)
                 actual_session = ScreenManager.find_screen_by_name(session_name)
                 
                 if actual_session:
-                    print(f"      ✅ 세션 확인됨: {actual_session} (시도 {i+1}/10)")
+                    print(f"      ✅ 세션 확인됨: {actual_session} (시도 {i+1}/20)")
                     return True, f"Screen 세션 생성 완료: {actual_session}", actual_session
                 else:
-                    if i == 0 or i == 4 or i == 9:  # 처음, 중간, 마지막만 출력
-                        print(f"      ⏳ 대기 중... (시도 {i+1}/10)")
+                    if i == 0 or i == 9 or i == 19:  # 처음, 중간, 마지막만 출력
+                        print(f"      ⏳ 대기 중... (시도 {i+1}/20)")
             
             # 최종 확인
             all_screens = ScreenManager.list_screens()

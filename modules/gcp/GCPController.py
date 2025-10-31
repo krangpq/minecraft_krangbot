@@ -26,7 +26,7 @@ class GCPController:
         return channel
     
     async def send_shutdown_request(self, instance: str, reason: str = "자동 종료") -> Tuple[bool, str]:
-        """GCP 인스턴스 중지 요청"""
+        """GCP 인스턴스 중지 요청 (재시도 로직 추가)"""
         try:
             channel = self.get_control_channel()
             
@@ -34,7 +34,7 @@ class GCPController:
             
             print(f"📤 GCP 중지 요청 전송: {instance}")
             
-            # 응답 대기 (최대 60초)
+            # 응답 대기 (재시도 3회)
             def check(m):
                 return (
                     m.reference and 
@@ -42,26 +42,33 @@ class GCPController:
                     m.author.id == self.controller_bot_id
                 )
             
-            try:
-                response = await self.bot.wait_for('message', check=check, timeout=60.0)
-                
-                if "✅" in response.content:
-                    print(f"✅ GCP 중지 성공")
-                    return True, response.content
-                else:
-                    print(f"❌ GCP 중지 실패: {response.content}")
-                    return False, response.content
+            for attempt in range(3):
+                try:
+                    timeout = 90.0 if attempt == 0 else 60.0
+                    response = await self.bot.wait_for('message', check=check, timeout=timeout)
                     
-            except asyncio.TimeoutError:
-                print("⏱️ GCP 중지 요청 타임아웃")
-                return False, "⏱️ 컨트롤러 봇 응답 없음 (타임아웃)"
-                
+                    if "✅" in response.content:
+                        print(f"✅ GCP 중지 성공 (시도 {attempt + 1}/3)")
+                        return True, response.content
+                    else:
+                        print(f"❌ GCP 중지 실패: {response.content}")
+                        return False, response.content
+                        
+                except asyncio.TimeoutError:
+                    if attempt == 2:
+                        print("⏱️ GCP 중지 요청 타임아웃 (3회 시도 실패)")
+                        return False, "⏱️ 컨트롤러 봇 응답 없음 (3회 시도 후 타임아웃)"
+                    else:
+                        print(f"⏱️ 타임아웃 - 재시도 {attempt + 2}/3")
+                        await asyncio.sleep(5)
+                        continue
+                    
         except Exception as e:
             print(f"❌ GCP 중지 요청 오류: {e}")
             return False, f"❌ 오류 발생: {e}"
-    
+
     async def send_start_request(self, instance: str) -> Tuple[bool, str]:
-        """GCP 인스턴스 시작 요청"""
+        """GCP 인스턴스 시작 요청 (재시도 로직 추가)"""
         try:
             channel = self.get_control_channel()
             
@@ -69,7 +76,7 @@ class GCPController:
             
             print(f"📤 GCP 시작 요청 전송: {instance}")
             
-            # 응답 대기 (최대 120초 - 시작은 오래 걸릴 수 있음)
+            # 응답 대기 (재시도 3회)
             def check(m):
                 return (
                     m.reference and 
@@ -77,20 +84,27 @@ class GCPController:
                     m.author.id == self.controller_bot_id
                 )
             
-            try:
-                response = await self.bot.wait_for('message', check=check, timeout=120.0)
-                
-                if "✅" in response.content:
-                    print(f"✅ GCP 시작 성공")
-                    return True, response.content
-                else:
-                    print(f"❌ GCP 시작 실패: {response.content}")
-                    return False, response.content
+            for attempt in range(3):
+                try:
+                    timeout = 150.0 if attempt == 0 else 120.0
+                    response = await self.bot.wait_for('message', check=check, timeout=timeout)
                     
-            except asyncio.TimeoutError:
-                print("⏱️ GCP 시작 요청 타임아웃")
-                return False, "⏱️ 컨트롤러 봇 응답 없음 (타임아웃)"
-                
+                    if "✅" in response.content:
+                        print(f"✅ GCP 시작 성공 (시도 {attempt + 1}/3)")
+                        return True, response.content
+                    else:
+                        print(f"❌ GCP 시작 실패: {response.content}")
+                        return False, response.content
+                        
+                except asyncio.TimeoutError:
+                    if attempt == 2:
+                        print("⏱️ GCP 시작 요청 타임아웃 (3회 시도 실패)")
+                        return False, "⏱️ 컨트롤러 봇 응답 없음 (3회 시도 후 타임아웃)"
+                    else:
+                        print(f"⏱️ 타임아웃 - 재시도 {attempt + 2}/3")
+                        await asyncio.sleep(10)
+                        continue
+                    
         except Exception as e:
             print(f"❌ GCP 시작 요청 오류: {e}")
             return False, f"❌ 오류 발생: {e}"
