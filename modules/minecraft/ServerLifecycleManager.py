@@ -205,6 +205,17 @@ class ServerLifecycleManager:
                 return False, f"백업을 찾을 수 없습니다: {server_id}"
             
             backup_path = backups[0]
+            
+            # 백업 무결성 검증
+            backup_config = backup_path / 'bot_config.json'
+            if not backup_config.exists():
+                return False, f"백업이 손상되었습니다: bot_config.json 누락"
+            
+            # 서버 jar 파일 확인
+            backup_jar = backup_path / 'server.jar'
+            if not backup_jar.exists():
+                return False, f"백업이 손상되었습니다: server.jar 누락"
+            
             server_path = self.servers_dir / server_id
             
             # 현재 서버 삭제

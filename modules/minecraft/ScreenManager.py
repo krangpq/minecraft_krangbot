@@ -140,7 +140,7 @@ class ScreenManager:
                             print(f"      ⚠️ 기존 세션 종료 확인 실패, 계속 진행...")
                     
                     # 추가 대기 (안전성)
-                    await asyncio.sleep(1)
+                    await asyncio.sleep(2)
                 else:
                     return False, f"Screen 세션이 이미 존재합니다: {existing_session}", None
             

@@ -94,6 +94,8 @@ class ServerScanner:
                 print(f"   ✅ 마인크래프트 포트: {mc_port}")
             except RuntimeError as e:
                 print(f"   ❌ 포트 할당 실패: {e}")
+                print(f"   💡 사용 가능한 포트 범위: {self.port_manager.PORT_RANGE_START}-{self.port_manager.PORT_RANGE_END}")
+                print(f"   💡 다른 서버를 중지하거나 포트를 수동 설정하세요")
                 continue
             
             # 3. RCON 포트 할당
@@ -112,6 +114,7 @@ class ServerScanner:
                 
             except RuntimeError as e:
                 print(f"   ❌ RCON 포트 할당 실패: {e}")
+                print(f"   💡 사용 가능한 RCON 포트 범위: {self.port_manager.RCON_RANGE_START}-{self.port_manager.RCON_RANGE_END}")
                 # RCON 실패해도 서버는 등록 (RCON 비활성화)
                 server_config['rcon']['enabled'] = False
             

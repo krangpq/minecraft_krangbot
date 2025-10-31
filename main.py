@@ -263,7 +263,12 @@ class MinecraftBot(commands.Bot):
                         timeout=15.0
                     )
                 except asyncio.TimeoutError:
-                    print(f"⚠️ [{server_id}] 서버 상태 확인 타임아웃 - 이번 체크는 건너뜀")
+                    print(f"⚠️ [{server_id}] 서버 상태 확인 타임아웃 - 카운터 초기화")
+                    # 타임아웃 시 안전하게 카운터 초기화
+                    if server_id in self.empty_since:
+                        del self.empty_since[server_id]
+                    if server_id in self.shutdown_notified:
+                        del self.shutdown_notified[server_id]
                     continue
                 except Exception as e:
                     print(f"⚠️ [{server_id}] 상태 확인 오류: {e}")
