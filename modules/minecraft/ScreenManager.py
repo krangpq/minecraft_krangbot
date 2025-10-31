@@ -288,7 +288,19 @@ class ScreenManager:
             전체 세션 ID (예: "12345.minecraft_main") 또는 None
         """
         # ✅ minecraft_로 시작하는 세션만 검색
-        screens = ScreenManager.list_screens(filter_prefix="minecraft_")
+        if "_" in session_name:
+            # "minecraft_testserver" -> "minecraft_"
+            # "spigot_build_1_21_1" -> "spigot_build_"
+            if session_name.startswith("spigot_build_"):
+                filter_prefix = "spigot_build_"
+            elif session_name.startswith("minecraft_"):
+                filter_prefix = "minecraft_"
+            else:
+                filter_prefix = None
+        else:
+            filter_prefix = None
+        
+        screens = ScreenManager.list_screens(filter_prefix=filter_prefix)
         
         for screen in screens:
             # "12345.minecraft_main" 형식에서 이름 부분만 추출

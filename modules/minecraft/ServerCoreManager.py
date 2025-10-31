@@ -130,8 +130,13 @@ class ServerCoreManager:
                         print(f"💡 빌드 과정을 보려면: screen -r {actual_session}")
                         
                         # 세션이 종료될 때까지 대기
-                        while ScreenManager.screen_exists(session_name):
+                        while True:
                             await asyncio.sleep(10)
+                            # spigot_build_ 세션도 찾을 수 있도록 수정됨
+                            if not ScreenManager.screen_exists(session_name):
+                                print(f"[Spigot {version}] Screen 세션 종료됨")
+                                break
+
                         
                         print(f"[Spigot {version}] Screen 세션 종료 - 빌드 결과 확인 중...")
                     else:
