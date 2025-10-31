@@ -218,8 +218,14 @@ class ServerCoreManager:
     async def update_paper(self):
         """Paper 다운로드"""
         try:
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (compatible; MinecraftBot/1.0)'
+            }
             async with aiohttp.ClientSession() as session:
                 async with session.get('https://papermc.io/api/v2/projects/paper') as resp:
+                    if resp.status != 200:
+                        print(f"Paper 실패: HTTP {resp.status}")
+                        return
                     data = await resp.json()
                     versions = data['versions']
                 
@@ -367,7 +373,12 @@ class ServerCoreManager:
                 async with session.get('https://api.github.com/repos/EngineHub/WorldEdit/releases/latest') as resp:
                     data = await resp.json()
                     
-                    for asset in data['assets']:
+                    assets = data.get('assets', [])
+                    if not assets:
+                        print(f"WorldEdit 실패: assets 목록 없음")
+                        return
+                    
+                    for asset in assets:
                         if 'bukkit' in asset['name'].lower() and asset['name'].endswith('.jar'):
                             download_url = asset['browser_download_url']
                             

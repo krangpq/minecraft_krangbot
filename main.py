@@ -189,6 +189,8 @@ class MinecraftBot(commands.Bot):
         
         setup_mc_commands(self)
         setup_lifecycle_commands(self)
+
+        print(f"등록된 명령어 수: {len(self.tree.get_commands())}")
         
         await self.tree.sync()
         print("슬래시 명령어 동기화 완료")
