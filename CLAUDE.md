@@ -4,12 +4,12 @@
 원래 GCP(게임 서버) + VPN 서버(GCP 제어용 컨트롤러 봇) 구조였고, **본가 Windows 데스크톱 단독 운영으로 재구성 중**이다.
 
 - 이전 GCP 버전: 커밋 `9370830` (main 히스토리에 그대로 있음, 태그를 붙였다면 `v1-gcp`)
-- 현재: 데스크톱 재구성 **1단계 완료** (권한 등급, GCP 제거, 실행 파일 분리, 포트 고정) → **다음은 2단계** (아래 "다음 작업")
+- 현재: 데스크톱 재구성 **1단계**(권한 등급, GCP 제거, 실행 파일 분리, 포트 고정) + **2단계**(Windows 프로세스 관리, 모드팩 실행 방식 인식, 실행 중 서버 RCON 포트 보존) 완료 → **다음은 실제 서버로 확인 후 3단계** (아래 "다음 작업")
 
 ## 빠른 시작
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements.txt         # 이 PC: python=3.12(의존성 없음), py=3.13 → `py -3.13 ...` 로 실행
 python tests/run_all.py                 # 디스코드 접속 없이 전체 테스트 (커밋 전 필수)
 
 copy profiles\example.py profiles\dev.py   # (Linux/mac: cp) TOKEN, BOT_OWNER_ID, SERVERS_DIR, DEV_GUILD_ID 채우기
@@ -33,16 +33,20 @@ modules/permissions/       화이트리스트 + 등급 권한
   PermissionTree.py          모든 명령어 앞단 게이트(interaction_check) + 권한표 점검
   PermissionCommands.py      /권한 부여·회수·목록, /내권한
 modules/minecraft/
-  ServerScanner.py           SERVERS_DIR 하위 폴더 = 서버 하나씩 스캔, 포트 결정
-  ServerConfigurator.py      eula, server.properties(포트·RCON), bot_config.json
+  ServerScanner.py           SERVERS_DIR 하위 폴더 = 서버 하나씩 스캔, 포트 결정 (실행 중 서버는 파일 안 고침)
+  ServerConfigurator.py      eula, server.properties(포트·RCON), bot_config.json (원자적 저장)
+  LaunchResolver.py          시작 명령 결정 (launch.args → Forge/NeoForge args 파일 → Fabric → 일반 jar), Java 선택
+  ProcessManager.py          java 직접 실행(최소화 콘솔), PID 파일, psutil 검증·재연결, 외부 실행 서버 인식, Ctrl+C 전달
   PortManager.py             포트 검사/할당 (게임 25565-25600, RCON 35575-35650)
-  ServerManager.py           시작/중지/상태/명령/백업 (⚠️ Windows 미완, 아래 참고)
-  ScreenManager.py           Linux screen + OS별 TerminalLauncher (Windows 부분이 문제)
+  ServerManager.py           시작/중지/상태/명령/백업. terminal_mode "process"(Windows 기본) = ProcessManager
+  ScreenManager.py           Linux screen + TerminalLauncher (예전 방식, Linux 에서만 씀)
   ServerCoreManager.py       Paper/Vanilla/Fabric/Forge 구동기·플러그인 다운로드, Spigot 빌드
   ServerLifecycleManager.py  서버 생성/삭제/업그레이드/롤백, 백업 30일 보관
   ServerCommands.py, ServerLifecycleCommands.py   슬래시 명령어
-  RconClient.py              mcrcon 래퍼
-tests/                     run_all.py, test_permissions.py, test_integration.py
+  RconClient.py              RCON 직접 구현 (응답 대기 시간 제한 있음, mcrcon 안 씀)
+tests/                     run_all.py, test_permissions.py, test_integration.py, test_process.py
+  fixtures/packs/            실제 서버팩의 실행 관련 파일 복사본 (run.bat, user_jvm_args.txt, win_args.txt, start.bat, server.properties)
+  fakes/                     가짜 서버(fake_server.py, RCON·Ctrl+C 흉내) / 가짜 봇(fake_bot.py)
 ```
 
 ## 설정 (settings.py + profiles)
@@ -78,7 +82,8 @@ tests/                     run_all.py, test_permissions.py, test_integration.py
 - **게임 포트는 server.properties 에 적힌 값을 봇이 절대 바꾸지 않는다.** 사용 중이어도 그대로 둔다 (포워딩 규칙과 어긋나지 않게). 포트가 없는 새 서버만 빈 포트를 골라 기록한다.
 - 같은 게임 포트를 쓰는 서버가 둘이면 경고만 (동시 실행 불가).
 - **RCON 은 35575-35650**, 게임 포트 범위와 겹치지 않게 분리. 봇만 localhost 로 쓰고 **포워딩 금지**. 예전 기본값(25575)처럼 게임 범위에 있으면 자동으로 옮기고 bot_config.json 에도 반영.
-- `PortManager.is_port_open` 은 Windows 에서 `SO_REUSEADDR` 를 안 쓴다 (Windows 에선 사용 중 포트에도 bind 를 허용해서 검사가 무의미해짐). **실제 Windows 에서 아직 검증 안 함.**
+- `PortManager.is_port_open` 은 Windows 에서 `SO_REUSEADDR` 를 안 쓴다 (Windows 에선 사용 중 포트에도 bind 를 허용해서 검사가 무의미해짐). 또 Windows 는 다른 프로그램이 `127.0.0.1:포트` 에만 bind 해도 `0.0.0.0:포트` bind 를 허용하므로 둘 다 검사한다 (실제 Windows 에서 테스트로 확인).
+- **켜져 있는 서버(PID 파일로 확인되거나 외부 실행으로 인식된 서버)는 스캔 때 server.properties·bot_config.json 을 안 고친다.** RCON 포트는 PID 파일에 적힌 실행 당시 값(외부 실행이면 server.properties 값)을 쓰고 다른 서버가 못 가져가게 예약.
 - server.properties 를 쓸 땐 끝 줄바꿈 유지 (예전에 줄바꿈 없이 이어 붙여서 `rcon.password=XXXserver-port=25566` 처럼 깨진 버그가 있었음).
 
 ## 운영 환경 (설계 전제)
@@ -86,31 +91,51 @@ tests/                     run_all.py, test_permissions.py, test_integration.py
 - 운영: 본가 Windows 데스크톱 (Ryzen 7 9700X, RAM 32GB). 원격으로 관리하며, 다른 무거운 CPU 작업과 같이 돌 수 있음 → 모드팩 서버 동시 실행 수는 RAM 기준으로 보수적으로.
 - **갑자기 전원이 나갈 수 있다** (불안정 시 스마트 플러그로 재부팅). 파일 쓰기는 원자적으로, 봇·서버는 재부팅 후 스스로 복구하는 것을 전제로 설계.
 - 소유자가 오래 자리를 비울 수 있다 → 무인 운영, 친구들은 등급 권한으로 직접 켜고 끈다.
-- 서버 폴더: `C:\mcserver\<서버>` (모드팩 위주, 예: Cursed Jujutsu 모드팩 = Forge 1.20.1). **실제 폴더 구조는 아직 확인 안 함** → 2단계 시작 전에 확인.
+- 서버 폴더: `C:\mcserver\<서버>` — 2026-11-25 조사 (8개, 전부 server-port=25565 → **한 번에 하나만** 켤 수 있음, RCON 은 전부 꺼져 있었음)
+  | 폴더 | 로더 | -Xmx (위치) | Java |
+  |---|---|---|---|
+  | JujutsuCraft, Otaku Anime World …, KimetsuNoYaiba(Demon-Slayer) | Forge 1.20.1 (ServerPackCreator 팩, 루트 server.jar 는 ServerStarterJar) | 4G (user_jvm_args.txt, start.bat 이 variables.txt 로 덮어씀) | 17 |
+  | jujutsu, jujutsu_real, one_piece | Forge 1.20.1 (루트 jar 없음) | 12G (user_jvm_args.txt) | 17 |
+  | pixelmon | NeoForge 21.1.248 = MC 1.21.1 | Xms8G/Xmx16G (user_jvm_args.txt) | 21 |
+  | withher | Fabric 0.20.1, MC 26.3 | Xms2G/Xmx16G (start.bat → 첫 스캔 때 bot_config 로 옮김) | 25 |
+- 설치된 Java: Temurin 21(PATH), 25 (`C:\Program Files\Eclipse Adoptium`), 17 (`~\.jabba\jdk\temurin@17.0.19`, 서버팩 start.ps1 이 설치)
 - 개발: 노트북에서 `run_dev.py` (별도 테스트 봇 토큰 + `DEV_GUILD_ID`).
 - 디스코드 레이트 리밋: 로그/상태 패널은 새 메시지를 계속 보내지 말고 기존 메시지를 수정.
 - **출력 인코딩**: Windows 에서 출력을 파일·파이프로 돌리면(서비스, 작업 스케줄러) Python 3.15 미만은 cp949 로 인코딩해서 이모지 `print` 에서 `UnicodeEncodeError` 로 죽는다. `run_prod.py`/`run_dev.py` 맨 위에서 stdout/stderr 를 UTF-8 로 고정해 뒀음 → 새 진입 파일을 만들면 같은 처리를 넣을 것. 하위 프로세스는 `-X utf8`.
 
 ## 다음 작업 (우선순위 순)
 
-### 2단계 — Windows 프로세스 관리 (핵심, 이게 안 되면 서버 켜기/끄기가 Windows 에서 사실상 안 됨)
-1. **Windows 에서 실행한 서버가 추적되지 않는다.** `ServerManager.start_server` → `TerminalLauncher.launch_server` → `_launch_windows` 가 세션/프로세스를 돌려주지 않아 `running_servers` 에 등록이 안 됨 → `is_server_running` 이 항상 False → 상태 표시·중지·빈 서버 자동 종료가 다 안 먹고, 다시 켜면 중복 실행을 시도함.
-   - 기본 모드 `separate` 는 `start ... cmd /k` 로 새 창만 띄움 (핸들 없음).
-   - `TerminalLauncher._launch_background` 는 `stdout=PIPE` 를 읽지 않음 (파이프가 차면 서버가 멈출 수 있음) + 역시 등록 안 됨.
-   - `ServerManager._start_background` (로그 파일로 stdout, Popen 등록) 는 terminal_launcher 가 없을 때만 쓰임.
-   - 방향: java 를 직접 실행(작업 디렉터리 = 서버 폴더, 로그는 파일) → **PID 파일**(서버 폴더 또는 data/) 기록 → 봇 재시작 시 **psutil 로 PID+명령줄 검증해서 재연결** → 명령·정지는 RCON(`stop`), 콘솔 로그는 `logs/latest.log` 추적. 봇이 죽어도 서버는 살아 있게 (봇 프로세스와 분리, Windows 는 `CREATE_NEW_PROCESS_GROUP`/`DETACHED_PROCESS` 검토).
-   - `_reconnect_existing_servers` 는 지금 Linux screen 전용.
-2. **모드팩 실행 방식 인식.** 스캐너는 `*.jar`(server.jar 우선)를 골라 `java -Xms -Xmx -jar X nogui` 로 실행함. Forge 1.17+ / NeoForge 서버팩은 `run.bat` + `user_jvm_args.txt` + `libraries/net/minecraftforge/forge/<ver>/win_args.txt` (NeoForge 는 `libraries/net/neoforged/neoforge/<ver>/win_args.txt`) 구조라 루트에 실행할 jar 가 없거나 installer jar 를 잡을 수 있음.
-   - 방향: 감지 순서 = bot_config.json 의 명시적 시작 명령 → Forge/NeoForge args 파일 → 일반 jar. 메모리(-Xmx)는 user_jvm_args.txt 와 bot_config 중 한 곳에서만 관리하도록 정리.
-3. **봇 재시작 시 RCON 포트 재할당 문제.** 서버가 켜져 있으면 스캔 때 RCON 포트가 "사용 중"으로 보여 다른 포트를 고르고 server.properties 를 바꿈 → 켜져 있는 서버와 봇 설정이 어긋남 (재시작 전까지 RCON 안 됨). 1번 재연결과 같이 처리: 실행 중으로 확인된 서버는 RCON 포트를 건드리지 말 것. (RCON 비밀번호는 기존 값을 재사용하므로 문제 없음)
+### 2단계 — 완료 (2026-11-25). 실제 서버로 확인할 것
+설계 요약
+- **실행**: java 를 직접 실행 (run.bat 안 거침 → PID = java). Windows 는 `CREATE_NEW_CONSOLE` + `SW_SHOWMINNOACTIVE` (최소화 콘솔, `SERVER_CONSOLE_MODE`) + `CREATE_BREAKAWAY_FROM_JOB`(거부되면 빼고 재시도). 봇이 죽어도 서버는 삶 (테스트로 확인).
+  - `CREATE_NEW_PROCESS_GROUP` 은 **쓰면 안 됨**: 새 프로세스 그룹은 Ctrl+C 가 꺼진 상태로 시작해서 Ctrl+C 종료가 안 됨 (실제 확인).
+  - 실행 직전 `SetConsoleCtrlHandler(None, False)`: 봇이 "Ctrl+C 무시" 상태면 자식이 물려받아 Ctrl+C 가 안 먹음 (실제 확인).
+- **PID 파일**: `<서버>/.krangbot/process.json` (pid, create_time, exe, cmdline, cwd, game_port, rcon_port …). 검증 = PID 존재 + 생성 시각 ±1초 + exe + cmdline (+ cwd). 무효면 `.stale`, 깨졌으면 `.corrupt` 로 옮김.
+- **외부 실행 인식**(`ADOPT_EXTERNAL_SERVERS`): 작업 폴더가 서버 폴더인 java.exe 를 찾아 등록 → 중복 실행 방지. 이런 서버는 RCON 이 꺼진 설정으로 떠 있을 수 있음.
+- **중지**: 정상 = RCON stop (안 되면 콘솔 Ctrl+C) → `STOP_TIMEOUT`(180초) 대기 → 안 꺼지면 알리기만 (`AUTO_FORCE_KILL_ON_TIMEOUT=False`). 강제(`/서버중지 강제`) = `save-all flush` → Ctrl+C → `FORCE_STOP_GRACE`(30초) → 프로세스 강제 종료. Ctrl+C 는 도우미 프로세스가 서버 콘솔에 AttachConsole 해서 보냄 → JVM 종료 훅에서 저장.
+- **봇 종료**: `STOP_SERVERS_ON_BOT_EXIT=False` → 서버는 계속 돌고 봇 재시작 시 재연결.
+- **시작 명령**: `bot_config.json` 의 `launch.args` → Forge/NeoForge args 파일(run.bat 이 가리키는 것) → Fabric(`fabric-server-launch.jar`) → 일반 jar(installer 제외). 시작할 때마다 다시 결정 (user_jvm_args.txt 수정이 바로 반영).
+- **메모리는 한 곳**: Forge/NeoForge = user_jvm_args.txt (봇은 읽기만, bot_config 에 memory 안 넣음). jar/Fabric = bot_config.json (처음엔 start.bat 의 값을 옮겨 적음).
+- **Java**: bot_config `java` > `JAVA_PATHS` > 자동 감지(필요 버전 이상 중 가장 낮은 것) > `DEFAULT_JAVA`. MC 1.17→16, 1.18~1.20.4→17, 1.20.5+→21, 26.x→25.
+- **시작 거부**: 이미 실행 중 / 같은 게임 포트 서버 실행 중 / 포트를 다른 프로그램이 씀 / 가용 RAM < -Xmx + `MEMORY_CHECK_BUFFER_MB`.
+- bot_config.json 키 (전부 선택): `name`, `description`, `memory{min,max}`(jar/Fabric), `rcon{port,auto_password}`, `java`, `launch{args, mc_version}`, `mc_version`
+
+확인 안 된 것 (가짜 서버로만 테스트함)
+- 실제 java/Forge 서버가 Ctrl+C 에 저장하고 꺼지는지 (JVM 종료 훅 동작 — 확실하지 않음, 실제로 한 번 확인 필요)
+- Windows 11 기본 터미널이 Windows Terminal 이면 새 콘솔이 WT 탭으로 열려서 최소화가 안 될 수 있음 (확실하지 않음)
+- 서버 콘솔 창을 X 로 닫으면 Windows 가 몇 초 안에 강제 종료함 → 저장 안 될 수 있음
+- 1.20.1 Forge 팩들이 예전엔 Java 21 로도 실행됐었는데 이제 17 로 실행됨 (Forge 1.20.1 기준 버전이라 문제없을 것으로 보지만 확인 필요)
+- 처음 봇을 켜면 꺼져 있는 모든 서버의 server.properties 에 RCON(35575~)이 켜지고 bot_config.json 이 생김 (설계대로)
 
 ### 3단계 — 무인 운영
 - 부팅 시 봇 자동 실행 (작업 스케줄러 또는 NSSM 서비스), 꺼지기 전에 켜져 있던 서버 자동 복구 (상태 파일)
 - 주기적 `save-all` + 백업 (전원 차단 대비), 백업 무결성 확인 후 롤백
-- 빈 서버 자동 종료(`ENABLE_AUTO_SHUTDOWN`)는 코드는 있으나 `is_server_running` 에 의존 → 2단계 후 검증
+- 빈 서버 자동 종료(`ENABLE_AUTO_SHUTDOWN`): 이제 `is_server_running` 이 동작하므로 실제로 켜서 검증
+- 부팅 시 자동 실행은 작업 스케줄러 권장. NSSM 등 서비스 래퍼는 작업 개체로 트리를 죽일 수 있음 (`CREATE_BREAKAWAY_FROM_JOB` 이 거부되면 로그에 표시됨)
 
 ### 정리/선택
-- Linux 전용 잔재 정리 여부 결정: `ScreenManager`, `/스크린정보`, `DEFAULT_TERMINAL_MODE` (Linux 서버로 갈 계획 없으면 Windows 백엔드로 대체)
+- Linux 전용 잔재 정리 여부 결정: `ScreenManager`, `/스크린정보` (Windows 는 이미 process 모드. ProcessManager 는 Linux 도 지원하므로 Linux 에서도 process 모드로 통일 가능)
+- `RconClient` 는 응답 패킷 1개만 읽음 (아주 긴 응답은 잘릴 수 있음 — mcrcon 도 같았음)
 - `ServerManager.servers_dir = base_path/'servers'` 는 mkdir 만 하고 안 쓰임 (SERVERS_DIR 와 별개) → 정리
 - 공인 IP 변경 감지 / DuckDNS 갱신 (선택)
 
@@ -118,6 +143,7 @@ tests/                     run_all.py, test_permissions.py, test_integration.py
 
 `python tests/run_all.py` — 각 테스트를 별도 프로세스로 실행 (settings.activate 는 프로세스당 1번).
 - `test_permissions.py`: 조사, 부여/회수 규칙 전체, 저장·재로드, 저장 실패 롤백, 깨진 파일 격리, 명령어 경로·옵션 등급, 게이트(가짜 인터랙션)
+- `test_process.py`: LaunchResolver(실제 팩 복사본), 스캐너(실행 중이면 파일 안 고침), 가짜 서버로 시작·PID 파일·재연결·RCON·정상/강제/시간초과 중지·Ctrl+C·봇이 죽어도 생존·외부 실행 인식·PID 재사용 방지·메모리 검사. Windows 에선 최소화 창이 잠깐씩 뜸 (약 2분).
 - `test_integration.py`: 임시 폴더 + 임시 프로필(`profiles/itest.py`, 끝나면 삭제)로 봇 생성 → 스캔·포트 정책 → 명령어 등록 → 권한표 = 실제 명령어 → 권한 명령어 콜백. 게임 포트는 비어 있는 걸 골라 쓰므로 실제 서버가 켜진 PC 에서도 실행 가능.
 - 디스코드에 실제 접속하는 테스트는 없다. 실제 동작 확인은 `run_dev.py` + 테스트 길드로.
 - `screen` 이 없는 환경에서 ScreenManager 가 traceback 을 출력하지만 잡힌 예외라 무해함.

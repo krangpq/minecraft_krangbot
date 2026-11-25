@@ -28,3 +28,12 @@ DEV_GUILD_ID = None
 # 빈 서버 자동 종료 (RAM·CPU 확보용)
 ENABLE_AUTO_SHUTDOWN = False
 EMPTY_SERVER_TIMEOUT = 30
+
+# ── 서버 프로세스 (필요할 때만 주석 풀어서 바꾸세요. 기본값과 설명은 settings.py) ──
+# SERVER_CONSOLE_MODE = "minimized"       # "minimized" / "normal" / "hidden"
+# JAVA_PATHS = {17: r"C:\Users\...\.jabba\jdk\temurin@17.0.19\bin\java.exe",
+#               21: r"C:\Program Files\Eclipse Adoptium\jdk-21.0.12.8-hotspot\bin\java.exe"}
+# STOP_TIMEOUT = 180                      # 정상 중지 대기 (초)
+# AUTO_FORCE_KILL_ON_TIMEOUT = False      # 시간 초과 시 자동 강제 종료
+# STOP_SERVERS_ON_BOT_EXIT = False        # 봇이 꺼질 때 서버도 끌지
+# MEMORY_CHECK_ENABLED = True             # 시작 전 가용 RAM 검사

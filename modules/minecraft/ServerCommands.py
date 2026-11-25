@@ -155,10 +155,20 @@ def setup_commands(bot):
         )
         
         # 프로세스 상태
-        is_running = bot.mc.is_server_running(server_id)
+        is_process = bot.mc.is_process_running(server_id)
+        if not is_process:
+            process_text = "❌ 중지됨"
+        elif status and status.get('online'):
+            process_text = "✅ 실행 중"
+        else:
+            process_text = "🟡 시작 중 (또는 응답 없음)"
+        if is_process and performance and performance.get('pid'):
+            process_text += f"\nPID {performance['pid']}"
+            if performance.get('external'):
+                process_text += " (봇 밖에서 켬)"
         embed.add_field(
             name="⚙️ 프로세스",
-            value="✅ 실행 중" if is_running else "❌ 중지됨",
+            value=process_text,
             inline=True
         )
         
@@ -329,7 +339,9 @@ def setup_commands(bot):
         
         if platform.system() != "Linux":
             await interaction.response.send_message(
-                "❌ 이 명령어는 Linux 환경에서만 사용 가능합니다.",
+                "❌ 이 명령어는 Linux(screen) 전용입니다.\n"
+                "💡 Windows 에서는 서버 콘솔이 서버 PC 작업 표시줄에 최소화된 창으로 떠 있어요. "
+                "디스코드에서는 `/명령어실행` 을 쓰세요.",
                 ephemeral=True
             )
             return

@@ -39,23 +39,27 @@ class PortManager:
             True: 포트 사용 가능 (열림)
             False: 포트 사용 중 (닫힘)
         """
+        # Windows 는 다른 프로그램이 127.0.0.1:포트 에만 bind 해 둔 경우 0.0.0.0:포트 bind 를 허용함
+        # (실제 Windows 에서 확인함) → 0.0.0.0 으로 검사할 땐 127.0.0.1 도 같이 확인
+        hosts = [host]
+        if host == '0.0.0.0':
+            hosts.append('127.0.0.1')
         try:
-            # bind()로 직접 확인 (가장 정확한 방법)
-            test_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            # Windows 의 SO_REUSEADDR 는 "사용 중인 포트에도 bind 허용" 이라 검사가 무의미해짐 → Windows 에선 안 씀
-            if os.name != "nt":
-                test_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            test_sock.settimeout(1)
-            
-            try:
-                test_sock.bind((host, port))
-                test_sock.close()
-                return True
-            except OSError as e:
-                # Address already in use
-                test_sock.close()
-                return False
-                
+            for h in hosts:
+                # bind()로 직접 확인
+                test_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                # Windows 의 SO_REUSEADDR 는 "사용 중인 포트에도 bind 허용" 이라 검사가 무의미해짐 → Windows 에선 안 씀
+                if os.name != "nt":
+                    test_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                try:
+                    test_sock.bind((h, port))
+                except OSError:
+                    # Address already in use
+                    return False
+                finally:
+                    test_sock.close()
+            return True
+
         except Exception as e:
             print(f"⚠️ 포트 {port} 확인 오류: {e}")
             return False

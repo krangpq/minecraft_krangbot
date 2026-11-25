@@ -16,6 +16,7 @@ REPO = TESTS_DIR.parent
 TESTS = [
     "test_permissions.py",
     "test_integration.py",
+    "test_process.py",      # 가짜 서버 프로세스를 실제로 띄움 (Windows 에선 최소화 창이 잠깐씩 뜸)
 ]
 
 

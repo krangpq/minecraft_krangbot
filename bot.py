@@ -42,6 +42,7 @@ from modules.minecraft import (
     setup_commands as setup_mc_commands,
     setup_lifecycle_commands
 )
+from modules.minecraft.ServerManager import make_process_manager
 
 # 권한 모듈
 from modules.permissions import (
@@ -72,6 +73,9 @@ class MinecraftBot(commands.Bot):
         self.lifecycle_manager = ServerLifecycleManager(SERVERS_DIR, self.core_manager)
         print("생명주기 관리자 초기화")
 
+        # 서버 프로세스 관리자 (스캔·재연결·시작/중지에 같이 씀)
+        self.process_manager = make_process_manager()
+
         # 서버 설정 준비
         servers_config = self._prepare_servers()
 
@@ -80,7 +84,8 @@ class MinecraftBot(commands.Bot):
             bot=self,
             base_path=str(BASE_PATH),
             servers_config=servers_config,
-            default_server=self._get_default_server(servers_config)
+            default_server=self._get_default_server(servers_config),
+            process_manager=self.process_manager,
         )
 
         # 빈 서버 자동 종료 상태 추적
@@ -101,7 +106,9 @@ class MinecraftBot(commands.Bot):
                 default_max_memory=DEFAULT_MAX_MEMORY
             )
 
-            scanner = ServerScanner(SERVERS_DIR, configurator)
+            scanner = ServerScanner(SERVERS_DIR, configurator,
+                                    process_manager=self.process_manager,
+                                    adopt_external=settings.ADOPT_EXTERNAL_SERVERS)
             servers = scanner.scan_all_servers()
 
             print(scanner.get_server_summary(servers))
@@ -296,8 +303,8 @@ class MinecraftBot(commands.Bot):
             status = "🟢" if self.mc.is_process_running(server_id) else "🔴"
 
             memory_config = config.get('memory', {})
-            min_mem = memory_config.get('min', 'N/A')
-            max_mem = memory_config.get('max', 'N/A')
+            min_mem = memory_config.get('min') or '?'
+            max_mem = memory_config.get('max') or '?'
             memory = f"{min_mem}-{max_mem}MB"
 
             print(f"   {status} [{server_id}] {config.get('name', server_id)} ({memory})")
