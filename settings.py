@@ -9,7 +9,6 @@
 - 프로필 파일에 여기 없는 이름을 쓰면 오타로 보고 시작을 멈춥니다.
 """
 
-import importlib.util
 import platform
 from pathlib import Path
 
@@ -91,13 +90,14 @@ def activate(profile: str):
             f"   profiles/example.py 를 profiles/{profile}.py 로 복사해서 값을 채워주세요."
         )
 
-    spec = importlib.util.spec_from_file_location(f"krangbot_profile_{profile}", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    # import 대신 소스를 직접 실행: .pyc 캐시를 안 만들고 안 읽음
+    # (캐시를 쓰면 같은 초·같은 크기로 수정했을 때 옛 값이 로드될 수 있고, 토큰이 든 .pyc 가 남음)
+    namespace = {"__file__": str(path), "__name__": f"krangbot_profile_{profile}"}
+    exec(compile(path.read_text(encoding="utf-8"), str(path), "exec"), namespace)
 
     g = globals()
     unknown = []
-    for key, value in vars(module).items():
+    for key, value in namespace.items():
         if not key.isupper():
             continue
         if key not in g or key.startswith("_") or key in ("PROFILE", "OS_TYPE", "SUPPORTED_OS", "PROJECT_ROOT"):

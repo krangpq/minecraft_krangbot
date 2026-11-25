@@ -3,6 +3,7 @@
 경로: modules/minecraft/PortManager.py
 """
 
+import os
 import socket
 from typing import Set, Optional
 
@@ -41,7 +42,9 @@ class PortManager:
         try:
             # bind()로 직접 확인 (가장 정확한 방법)
             test_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            test_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            # Windows 의 SO_REUSEADDR 는 "사용 중인 포트에도 bind 허용" 이라 검사가 무의미해짐 → Windows 에선 안 씀
+            if os.name != "nt":
+                test_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             test_sock.settimeout(1)
             
             try:
