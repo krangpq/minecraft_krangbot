@@ -16,4 +16,4 @@ python run_prod.py
 - 친구 등록: 디스코드에서 `/권한 부여` (등급 확인은 `/내권한`)
 
 구조, 설계 규칙, 남은 작업은 [CLAUDE.md](CLAUDE.md)에 있습니다.
-이전 GCP + VPN 버전은 태그 `v1-gcp` 입니다.
+이전 GCP + VPN 버전은 커밋 `9370830` 입니다 (`git checkout 9370830`, 태그를 붙였다면 `v1-gcp`).
