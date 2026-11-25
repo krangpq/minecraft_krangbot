@@ -12,6 +12,8 @@ from typing import Optional, Dict, Tuple
 from mcstatus import JavaServer
 import platform
 
+from .PortManager import PortManager
+
 # RCON 클라이언트
 try:
     from .RconClient import RconClient
@@ -131,7 +133,7 @@ class ServerManager:
                 try:
                     self.rcon_clients[server_id] = RconClient(
                         host=rcon_config.get('host', 'localhost'),
-                        port=rcon_config.get('port', 25575),
+                        port=rcon_config.get('port', PortManager.DEFAULT_RCON_PORT),
                         password=rcon_config.get('password', '')
                     )
                     print(f"✅ RCON 초기화: {config['name']}")

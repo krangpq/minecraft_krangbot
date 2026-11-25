@@ -77,10 +77,6 @@ def setup_lifecycle_commands(bot):
         최대메모리: Optional[int] = None,
         설명: Optional[str] = None
     ):
-        if not bot.is_authorized(interaction.user, "administrator"):
-            await interaction.response.send_message("권한이 없습니다.", ephemeral=True)
-            return
-        
         await interaction.response.defer()
         
         success, message, config = await bot.lifecycle_manager.create_server(
@@ -111,10 +107,6 @@ def setup_lifecycle_commands(bot):
     @app_commands.describe(서버="삭제할 서버", 강제삭제="백업 없이 삭제")
     @app_commands.autocomplete(서버=server_autocomplete)
     async def delete_server(interaction: discord.Interaction, 서버: str, 강제삭제: bool = False):
-        if not bot.is_authorized(interaction.user, "administrator"):
-            await interaction.response.send_message("권한 없음", ephemeral=True)
-            return
-        
         await interaction.response.defer()
         
         success, message = await bot.lifecycle_manager.delete_server(서버, force=강제삭제)
@@ -128,10 +120,6 @@ def setup_lifecycle_commands(bot):
     @app_commands.describe(서버="대상 서버", 새버전="새 버전", 새구동기="새 구동기 (선택)")
     @app_commands.autocomplete(서버=server_autocomplete, 새버전=version_autocomplete, 새구동기=core_type_autocomplete)
     async def upgrade_server(interaction: discord.Interaction, 서버: str, 새버전: str, 새구동기: Optional[str] = None):
-        if not bot.is_authorized(interaction.user, "administrator"):
-            await interaction.response.send_message("권한 없음", ephemeral=True)
-            return
-        
         await interaction.response.defer()
         
         success, message = await bot.lifecycle_manager.upgrade_server(서버, 새버전, 새구동기)
@@ -151,10 +139,6 @@ def setup_lifecycle_commands(bot):
     @app_commands.describe(서버="롤백할 서버")
     @app_commands.autocomplete(서버=server_autocomplete)
     async def rollback_server(interaction: discord.Interaction, 서버: str):
-        if not bot.is_authorized(interaction.user, "administrator"):
-            await interaction.response.send_message("권한 없음", ephemeral=True)
-            return
-        
         await interaction.response.defer()
         
         success, message = await bot.lifecycle_manager.rollback_server(서버)
@@ -168,10 +152,6 @@ def setup_lifecycle_commands(bot):
     @app_commands.describe(서버="대상 서버", 플러그인="추가할 플러그인")
     @app_commands.autocomplete(서버=server_autocomplete, 플러그인=plugin_autocomplete)
     async def add_plugin(interaction: discord.Interaction, 서버: str, 플러그인: str):
-        if not bot.is_authorized(interaction.user, "manage_guild"):
-            await interaction.response.send_message("권한 없음", ephemeral=True)
-            return
-        
         success, message = bot.lifecycle_manager.add_plugin_to_server(서버, 플러그인)
         
         if success:
@@ -221,10 +201,6 @@ def setup_lifecycle_commands(bot):
     
     @bot.tree.command(name="구동기업데이트", description="구동기 및 플러그인 업데이트")
     async def update_cores(interaction: discord.Interaction):
-        if not bot.is_authorized(interaction.user, "administrator"):
-            await interaction.response.send_message("권한 없음", ephemeral=True)
-            return
-        
         await interaction.response.defer()
         
         await interaction.followup.send("업데이트 시작 (시간 소요)")
@@ -235,10 +211,6 @@ def setup_lifecycle_commands(bot):
     
     @bot.tree.command(name="백업정리", description="오래된 백업 삭제")
     async def cleanup_backups(interaction: discord.Interaction):
-        if not bot.is_authorized(interaction.user, "administrator"):
-            await interaction.response.send_message("권한 없음", ephemeral=True)
-            return
-        
         await interaction.response.defer()
         
         success, message = await bot.lifecycle_manager.cleanup_old_backups()
@@ -249,10 +221,6 @@ def setup_lifecycle_commands(bot):
     @app_commands.describe(서버="대상 서버")
     @app_commands.autocomplete(서버=server_autocomplete)
     async def add_mod_command(interaction: discord.Interaction, 서버: str):
-        if not bot.is_authorized(interaction.user, "manage_guild"):
-            await interaction.response.send_message("권한 없음", ephemeral=True)
-            return
-        
         await interaction.response.send_message(
             f"{서버} 서버에 추가할 모드 jar 파일을 이 채널에 업로드하세요.\n"
             f"60초 이내에 업로드해주세요.",

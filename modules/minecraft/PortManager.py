@@ -16,9 +16,11 @@ class PortManager:
     PORT_RANGE_END = 25600
     
     # RCON 기본 포트 범위
-    DEFAULT_RCON_PORT = 25575
-    RCON_RANGE_START = 25575
-    RCON_RANGE_END = 25650
+    # 게임 포트 범위(25565-25600)와 겹치지 않게 분리 → 공유기에서 게임 포트를 범위로 포워딩해도
+    # RCON 포트가 외부에 같이 열리지 않음. RCON 포트는 절대 포워딩하지 말 것.
+    DEFAULT_RCON_PORT = 35575
+    RCON_RANGE_START = 35575
+    RCON_RANGE_END = 35650
     
     def __init__(self):
         self.used_ports: Set[int] = set()
@@ -96,8 +98,8 @@ class PortManager:
         Returns:
             사용 가능한 포트 번호
         """
-        # 선호 포트가 있고 사용 가능하면 사용
-        if prefer_port and self.is_port_open(prefer_port):
+        # 선호 포트가 있고 사용 가능하면 사용 (이번 스캔에서 이미 다른 서버에 준 포트는 제외)
+        if prefer_port and prefer_port not in self.used_ports and self.is_port_open(prefer_port):
             self.used_ports.add(prefer_port)
             return prefer_port
         
@@ -130,8 +132,15 @@ class PortManager:
         """
         exclude = {mc_port}  # 마인크래프트 포트는 제외
         
-        # 선호 포트가 있고 사용 가능하면 사용
-        if prefer_port and prefer_port != mc_port and self.is_port_open(prefer_port):
+        # 예전 기본값(25575 등) 처럼 게임 포트 범위 안에 있는 RCON 포트는 쓰지 않고 새로 할당
+        if prefer_port and self.is_game_port_range(prefer_port):
+            print(f"   🔁 RCON 포트 {prefer_port} 는 게임 포트 범위라 RCON 전용 범위로 옮깁니다")
+            prefer_port = None
+        
+        # 선호 포트가 있고 사용 가능하면 사용 (이번 스캔에서 이미 다른 서버에 준 포트는 제외)
+        if (prefer_port and prefer_port != mc_port
+                and prefer_port not in self.used_ports
+                and self.is_port_open(prefer_port)):
             self.used_ports.add(prefer_port)
             return prefer_port
         
@@ -152,6 +161,11 @@ class PortManager:
             )
         
         return port
+    
+    @classmethod
+    def is_game_port_range(cls, port: int) -> bool:
+        """게임 포트 범위 안인지"""
+        return cls.PORT_RANGE_START <= port <= cls.PORT_RANGE_END
     
     def mark_port_used(self, port: int):
         """포트를 사용 중으로 표시"""

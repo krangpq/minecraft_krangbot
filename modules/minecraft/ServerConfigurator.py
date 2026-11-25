@@ -9,6 +9,8 @@ import re
 from pathlib import Path
 from typing import Tuple, Optional
 
+from .PortManager import PortManager
+
 
 class ServerConfigurator:
     """서버 자동 설정 관리"""
@@ -88,7 +90,7 @@ class ServerConfigurator:
                 "max": self.default_max_memory
             },
             "rcon": {
-                "port": 25575,
+                "port": PortManager.DEFAULT_RCON_PORT,
                 "auto_password": True
             },
             "description": ""
@@ -206,7 +208,7 @@ class ServerConfigurator:
                     updated_lines.append(f"{key}={value}")
             
             with open(properties_file, 'w', encoding='utf-8') as f:
-                f.write('\n'.join(updated_lines))
+                f.write('\n'.join(updated_lines) + '\n')  # 끝 줄바꿈 (다른 함수가 이어 붙여도 안 깨지게)
             
             print(f"✅ RCON 설정 완료: {server_path.name}")
             return True, f"RCON이 포트 {rcon_port}에 설정되었습니다."
@@ -214,6 +216,27 @@ class ServerConfigurator:
         except Exception as e:
             print(f"❌ RCON 설정 실패: {e}")
             return False, f"RCON 설정 오류: {e}"
+    
+    def read_declared_port(self, server_path: Path) -> Optional[int]:
+        """
+        server.properties 에 server-port 가 실제로 적혀 있으면 그 값, 없거나 못 읽으면 None
+        (get_server_port 는 없을 때 25565 를 돌려줘서 '적혀 있음'과 구분이 안 됨)
+        """
+        properties_file = server_path / "server.properties"
+        if not properties_file.exists():
+            return None
+        try:
+            with open(properties_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith('server-port='):
+                        value = line.split('=', 1)[1].strip()
+                        if value.isdigit() and 1 <= int(value) <= 65535:
+                            return int(value)
+                        return None
+        except OSError as e:
+            print(f"⚠️ server.properties 읽기 실패 ({server_path.name}): {e}")
+        return None
     
     def get_server_port(self, server_path: Path) -> int:
         """server.properties에서 포트 읽기"""
@@ -267,6 +290,9 @@ class ServerConfigurator:
                     updated_lines.append(line)
             
             if not port_found:
+                # 마지막 줄에 줄바꿈이 없으면 붙어버림 (예: rcon.password=XXXserver-port=25566)
+                if updated_lines and not updated_lines[-1].endswith('\n'):
+                    updated_lines[-1] += '\n'
                 updated_lines.append(f"server-port={port}\n")
             
             with open(properties_file, 'w', encoding='utf-8') as f:
@@ -321,7 +347,7 @@ class ServerConfigurator:
         if not success:
             return False, eula_msg, {}
         
-        rcon_port = bot_config['rcon'].get('port', 25575)
+        rcon_port = bot_config['rcon'].get('port', PortManager.DEFAULT_RCON_PORT)
         
         existing_password = self._read_rcon_password(server_path)
         

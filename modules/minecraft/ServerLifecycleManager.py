@@ -9,6 +9,8 @@ from typing import Tuple, Optional, Dict
 from datetime import datetime, timedelta
 import json
 
+from .PortManager import PortManager
+
 
 class ServerLifecycleManager:
     """서버 생성/삭제/업그레이드 관리"""
@@ -62,7 +64,7 @@ class ServerLifecycleManager:
                 (server_path / 'mods').mkdir()
             
             # bot_config.json 생성
-            from config import DEFAULT_MIN_MEMORY, DEFAULT_MAX_MEMORY
+            from settings import DEFAULT_MIN_MEMORY, DEFAULT_MAX_MEMORY
             
             config = {
                 "name": server_id.replace('_', ' ').title(),
@@ -74,7 +76,7 @@ class ServerLifecycleManager:
                     "max": max_memory or DEFAULT_MAX_MEMORY
                 },
                 "rcon": {
-                    "port": 25575,
+                    "port": PortManager.DEFAULT_RCON_PORT,
                     "auto_password": True
                 },
                 "created_at": datetime.now().isoformat(),

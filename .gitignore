@@ -9,8 +9,14 @@ env/
 ENV/
 .venv
 
-# 설정 파일 (중요!)
+# 설정 파일 (중요!) — 토큰이 들어가는 프로필은 올리지 않음
+profiles/*
+!profiles/example.py
 config.py
+bot_runtime_config.json
+
+# 런타임 데이터 (권한 화이트리스트 등)
+data/
 
 # 서버 파일들
 servers/
